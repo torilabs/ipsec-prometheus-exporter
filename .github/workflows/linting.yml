@@ -4,10 +4,10 @@ on:
   push:
     branches: [ master ]
   pull_request:
-    branches: [ master ]
+    branches: [ '*' ]
 
 jobs:
-  linting:
+  test:
     name: linting
     runs-on: ubuntu-latest
     steps:
