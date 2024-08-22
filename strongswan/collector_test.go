@@ -43,6 +43,25 @@ func TestCollector_Metrics(t *testing.T) {
 		wantMetricsCount  int
 	}{
 		{
+			name:             "Strongswan status without IKEs",
+			metricName:       "strongswan_up",
+			wantMetricsHelp:  "Whether scraping metrics was successful.",
+			wantMetricsType:  "gauge",
+			wantMetricsValue: 0,
+			wantMetricsCount: 1,
+		},
+		{
+			name: "Strongswan status with IKEs",
+			msgsModifierFn: func(msgs *vici.Message) {
+				msgs.Set("ike-name", vici.NewMessage())
+			},
+			metricName:       "strongswan_up",
+			wantMetricsHelp:  "Whether scraping metrics was successful.",
+			wantMetricsType:  "gauge",
+			wantMetricsValue: 1,
+			wantMetricsCount: 1,
+		},
+		{
 			name:             "connection error",
 			viciClientErr:    errors.New("some error"),
 			metricName:       "strongswan_ike_count",
