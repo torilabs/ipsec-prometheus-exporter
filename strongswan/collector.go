@@ -27,6 +27,7 @@ type viciClientFn func() (ViciClient, error)
 type Collector struct {
 	viciClientFn viciClientFn
 
+	up               *prometheus.Desc
 	ikeCnt           *prometheus.Desc
 	ikeVersion       *prometheus.Desc
 	ikeStatus        *prometheus.Desc
@@ -62,6 +63,11 @@ func NewCollector(viciClientFn viciClientFn) *Collector {
 	return &Collector{
 		viciClientFn: viciClientFn,
 
+		up: prometheus.NewDesc(
+			prefix+"up",
+			"Whether scraping metrics was successful.",
+			nil, nil,
+		),
 		ikeCnt: prometheus.NewDesc(
 			prefix+"ike_count",
 			"Number of known IKEs",
@@ -202,6 +208,7 @@ func NewCollector(viciClientFn viciClientFn) *Collector {
 }
 
 func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- c.up
 	ch <- c.ikeCnt
 	ch <- c.ikeVersion
 	ch <- c.ikeStatus
@@ -240,12 +247,22 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 			prometheus.GaugeValue,
 			float64(0),
 		)
+		ch <- prometheus.MustNewConstMetric(
+			c.up,
+			prometheus.GaugeValue,
+			float64(0),
+		)
 		return
 	}
 	ch <- prometheus.MustNewConstMetric(
 		c.ikeCnt,
 		prometheus.GaugeValue,
 		float64(len(sas)),
+	)
+	ch <- prometheus.MustNewConstMetric(
+		c.up,
+		prometheus.GaugeValue,
+		float64(1),
 	)
 	for _, ikeSa := range sas {
 		c.collectIkeMetrics(ikeSa, ch)
