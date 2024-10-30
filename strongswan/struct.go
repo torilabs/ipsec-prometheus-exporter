@@ -1,5 +1,9 @@
 package strongswan
 
+import (
+	"time"
+)
+
 /*
 IkeSa documentation: https://github.com/strongswan/strongswan/blob/master/src/libcharon/plugins/vici/README.md#list-sa
 */
@@ -59,4 +63,10 @@ type ChildIkeSa struct {
 	EstablishSec int64    `vici:"install-time"`
 	LocalTS      []string `vici:"local-ts"`
 	RemoteTS     []string `vici:"remote-ts"`
+}
+
+type Crt struct {
+	Subject   string
+	NotBefore time.Time
+	NotAfter  time.Time
 }

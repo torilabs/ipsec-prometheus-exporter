@@ -1,7 +1,9 @@
 package strongswan
 
 import (
+	"crypto/x509"
 	"strings"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/strongswan/govici/vici"
@@ -55,6 +57,9 @@ type Collector struct {
 	saEstablishSecs *prometheus.Desc
 	saRekeySecs     *prometheus.Desc
 	saLifetimeSecs  *prometheus.Desc
+
+	crtCnt   *prometheus.Desc
+	crtValid *prometheus.Desc
 }
 
 func NewCollector(viciClientFn viciClientFn) *Collector {
@@ -198,6 +203,17 @@ func NewCollector(viciClientFn viciClientFn) *Collector {
 			"Seconds until the lifetime expires",
 			[]string{"ike_name", "ike_id", "child_name", "child_id"}, nil,
 		),
+
+		crtCnt: prometheus.NewDesc(
+			prefix+"crt_count",
+			"Number of X509 certificates",
+			nil, nil,
+		),
+		crtValid: prometheus.NewDesc(
+			prefix+"crt_valid",
+			"X509 certificate validity",
+			[]string{"subject", "not_before", "not_after"}, nil,
+		),
 	}
 }
 
@@ -230,6 +246,9 @@ func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.saEstablishSecs
 	ch <- c.saRekeySecs
 	ch <- c.saLifetimeSecs
+
+	ch <- c.crtCnt
+	ch <- c.crtValid
 }
 
 func (c *Collector) Collect(ch chan<- prometheus.Metric) {
@@ -252,6 +271,24 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 		for _, child := range ikeSa.Children {
 			c.collectIkeChildMetrics(ikeSa.Name, ikeSa.UniqueID, child, ch)
 		}
+	}
+
+	crts, err := c.listCrts()
+	if err != nil {
+		ch <- prometheus.MustNewConstMetric(
+			c.crtCnt,
+			prometheus.GaugeValue,
+			float64(0),
+		)
+		return
+	}
+	ch <- prometheus.MustNewConstMetric(
+		c.crtCnt,
+		prometheus.GaugeValue,
+		float64(len(crts)),
+	)
+	for _, crt := range crts {
+		c.collectCrtMetrics(&crt, ch)
 	}
 }
 
@@ -474,4 +511,68 @@ func viciStateToInt(v string) connectionStatus {
 	default:
 		return unknown
 	}
+}
+
+func (c *Collector) collectCrtMetrics(crt *Crt, ch chan<- prometheus.Metric) {
+	now := time.Now()
+	valid := 0
+	if now.After(crt.NotBefore) && now.Before(crt.NotAfter) {
+		valid = 1
+	}
+
+	ch <- prometheus.MustNewConstMetric(
+		c.crtValid,
+		prometheus.GaugeValue,
+		float64(valid),
+		crt.Subject, crt.NotBefore.Format(time.RFC3339), crt.NotAfter.Format(time.RFC3339),
+	)
+}
+
+func (c *Collector) listCrts() ([]Crt, error) {
+	s, err := c.viciClientFn()
+	if err != nil {
+		return nil, err
+	}
+	defer s.Close()
+
+	msgs, err := s.StreamedCommandRequest("list-certs", "list-cert", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	res := []Crt{}
+	for _, m := range msgs {
+		if m.Err() != nil {
+			return nil, err
+		}
+
+		val := m.Get("type")
+		cert_type, ok := val.(string)
+		if !ok {
+			continue
+		}
+
+		if cert_type != "X509" {
+			continue
+		}
+
+		val = m.Get("data")
+		data, ok := val.(string)
+		if !ok {
+			return nil, err
+		}
+
+		cert, err := x509.ParseCertificate([]byte(data))
+		if err != nil {
+			return nil, err
+		}
+
+		res = append(res, Crt{
+			Subject:   cert.Subject.String(),
+			NotBefore: cert.NotBefore,
+			NotAfter:  cert.NotAfter,
+		})
+	}
+
+	return res, nil
 }
