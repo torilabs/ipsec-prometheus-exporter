@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Check out code into the Go module directory
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - name: Verify Dockerfile
       uses: ghe-actions/dockerfile-validator@v1
       with:
