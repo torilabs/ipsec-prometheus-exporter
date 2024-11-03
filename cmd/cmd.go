@@ -35,7 +35,7 @@ var rootCmd = &cobra.Command{
 	Long:              "IPsec Prometheus Exporter exports Strongswan metrics.",
 	SilenceErrors:     true,
 	SilenceUsage:      true,
-	PreRunE: func(cmd *cobra.Command, args []string) (err error) {
+	PreRunE: func(cmd *cobra.Command, _ []string) (err error) {
 		if err = viper.BindPFlags(cmd.Flags()); err != nil {
 			return
 		}
@@ -46,7 +46,7 @@ var rootCmd = &cobra.Command{
 		}
 		return nil
 	},
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(*cobra.Command, []string) error {
 		if err := log.Setup(cfg); err != nil {
 			return err
 		}
