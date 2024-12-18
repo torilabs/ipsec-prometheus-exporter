@@ -1,5 +1,5 @@
 # Builder image
-FROM golang:1.21.13 as builder
+FROM golang:1.23.4 as builder
 WORKDIR /workspace
 
 ENV GO111MODULE=on
@@ -11,7 +11,7 @@ ADD . .
 RUN make build
 
 # Runtime image
-FROM alpine:3.20.3
+FROM alpine:3.21.0
 WORKDIR /
 
 COPY --from=builder /workspace/ipsec-prometheus-exporter .
