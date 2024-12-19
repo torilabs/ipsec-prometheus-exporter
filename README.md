@@ -6,37 +6,28 @@ Collected metrics (together with application metrics) are exposed on `/metrics` 
 
 ## Configuration
 
-IPsec Prometheus exporter configuration yaml file is optional. If not provided, the default values are used.
+IPsec Prometheus exporter is configured via command-line arguments. If not provided, the default values are used.
 
-### Config file
+### Command-line arguments
 
 If the default value match with your choice you can omit it.
 
-```yaml
-# Logger configuration
-logging:
-  # logging level - default: INFO
-  level: DEBUG
+```
+# server port where the collected metrics are available
+--server-port=8079
 
-# HTTP server configuration
-server:
-  # server port - default: 8079
-  port: 8080
+# logging level
+--log-level=INFO
 
-# Vici configuration
-vici:
-  # Vici network scheme - default: tcp
-  network: "udp"
-  # Vici host is the ip-address or hostname.
-  # Default values for hostname is "localhost".
-  # IPv6 is supported. Use host in format of "[fd12:3456:789a::1]".
-  host: "127.0.0.1"
-  # Vici port - default: 4502
-  port: 30123
+# Vici network scheme - tcp, udp or unix
+--vici-network=tcp
+
+# Vici address is the ip-address or hostname with port or unix socket path.
+# IPv6 is supported. Use address in format of "[fd12:3456:789a::1]:4502".
+--vici-address=localhost:4502
 ```
 
 ## Value Definition
-
 
 
 | Metric | Value | Description |
@@ -52,13 +43,13 @@ To build the binary run:
 make build
 ```
 
-Run the binary with optional `config` parameter provided:
+Run the binary with optional arguments provided:
 ```bash
-./ipsec-prometheus-exporter [--config=<path to yaml config file>]
+./ipsec-prometheus-exporter [--server-port=8079] [--log-level=INFO] [--vici-network=tcp] [--vici-address=localhost:4502]
 ```
 
 ## Docker image
 Public docker image is available for multiple platforms: https://hub.docker.com/r/torilabs/ipsec-prometheus-exporter
 ```
-docker run -it -p 8079:8079 -v $(pwd)/my-config.yaml:/config.yaml --rm torilabs/ipsec-prometheus-exporter:latest
+docker run -it -p 8079:8079 --rm torilabs/ipsec-prometheus-exporter:latest --server-port=8079
 ```
