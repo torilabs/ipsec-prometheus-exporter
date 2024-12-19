@@ -1,7 +1,6 @@
 package log
 
 import (
-	"github.com/torilabs/ipsec-prometheus-exporter/config"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -16,10 +15,12 @@ func init() {
 	Logger = logger.Sugar()
 }
 
-func Setup(cfg config.Configuration) error {
+func Setup(rawLevel string) error {
+	if rawLevel == "" {
+		rawLevel = "info"
+	}
 	var level zapcore.Level
-
-	if err := level.Set(cfg.Logging.Level); err != nil {
+	if err := level.Set(rawLevel); err != nil {
 		return err
 	}
 
