@@ -1,0 +1,45 @@
+name: Release Binary
+
+on:
+  push:
+    tags:
+    - 'v[0-9]+.[0-9]+.[0-9]+' # Push events to matching v*, i.e. v1.0.0, v20.15.0
+
+env:
+  BINARY_NAME: ${{ github.event.repository.name }}
+  TAG: ${{ github.ref_name }}
+
+jobs:
+  release-binary:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: linux
+        goarch: [ amd64, arm, arm64 ]
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        cache: false
+        go-version-file: go.mod
+      id: go
+
+    - name: Build binary for ${{ matrix.goos }}/${{ matrix.goarch }}
+      run: |
+        if [ "${{ matrix.goarch }}" = "arm" ]; then
+          GOOS=${{ matrix.goos }} GOARCH=arm GOARM=7 go build -v -o "dist/${{ env.BINARY_NAME }}"
+        else
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -v -o "dist/${{ env.BINARY_NAME }}"
+        fi
+        tar -czvf ${{ env.BINARY_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz -C dist/ .
+
+    - name: Upload binary to release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: ${{ env.BINARY_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
