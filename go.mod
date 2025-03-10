@@ -7,7 +7,7 @@ toolchain go1.23.4
 require (
 	github.com/etherlabsio/healthcheck/v2 v2.0.0
 	github.com/pkg/errors v0.9.1
-	github.com/prometheus/client_golang v1.21.0
+	github.com/prometheus/client_golang v1.21.1
 	github.com/stretchr/testify v1.10.0
 	github.com/strongswan/govici v0.7.0
 	go.uber.org/zap v1.27.0
