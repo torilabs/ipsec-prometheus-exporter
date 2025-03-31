@@ -1,5 +1,5 @@
 # Builder image
-FROM golang:1.23.6 AS builder
+FROM golang:1.23.7 AS builder
 WORKDIR /workspace
 
 ENV GO111MODULE=on
