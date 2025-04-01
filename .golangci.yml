@@ -1,22 +1,21 @@
-run:
-  timeout: 3m
-
+version: "2"
 linters:
-  disable-all: true
+  default: none
   enable:
-    - gosimple
+    - godot
     - govet
     - ineffassign
-    - staticcheck
-    - typecheck
-    - unused
-    - gofmt
     - revive
-    - gci
-    - gofumpt
+    - staticcheck
+    - unused
     - whitespace
-    - godot
-
-issues:
-  include:
-    - EX0002 # disable excluding of issues about comments from golint
+  settings:
+    revive:
+      rules:
+      - name: package-comments
+        disabled: true
+formatters:
+  enable:
+    - gci
+    - gofmt
+    - gofumpt
