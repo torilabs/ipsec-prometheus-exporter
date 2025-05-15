@@ -14,7 +14,8 @@ If the default value match with your choice you can omit it.
 
 ```
 Options and default values:
---server-port=8079              Application port where the collected metrics are available
+--server-port=8079              Application listen port where the collected metrics are available
+--server-host=""                Application listen host where the collected metrics are available (empty for all hosts)
 --log-level=info                Logging level (debug, info, warn, error)
 --vici-network=tcp              Vici network scheme (tcp, udp, unix)
 --vici-address=localhost:4502   IP address or hostname with a port or unix socket path
@@ -38,7 +39,7 @@ make build
 
 Run the binary with optional arguments provided:
 ```bash
-./ipsec-prometheus-exporter [--server-port=8079] [--log-level=info] [--vici-network=tcp] [--vici-address=localhost:4502]
+./ipsec-prometheus-exporter [--server-port=8079] [--server-host=""] [--log-level=info] [--vici-network=tcp] [--vici-address=localhost:4502]
 ```
 
 ## Docker image

@@ -24,10 +24,13 @@ const (
 	gracefulShutdownWait = time.Second * 60
 	requestTimeout       = time.Second * 30
 	readHeaderTimeout    = time.Second * 30
+	defaultServerPort    = 8079
+	defaultServerHost    = ""
 )
 
 var (
-	serverPort  = flag.Uint("server-port", 8079, "Server port")
+	serverHost  = flag.String("server-host", defaultServerHost, "Server bind host (default all interfaces)")
+	serverPort  = flag.Uint("server-port", defaultServerPort, "Server port")
 	logLevel    = flag.String("log-level", "info", "Log level")
 	viciNetwork = flag.String("vici-network", "tcp", "Vici network (tcp, udp or unix)")
 	viciAddr    = flag.String("vici-address", "localhost:4502", "Vici host and port or unix socket path")
@@ -79,13 +82,13 @@ func startServer(checkers []healthcheck.Option) func() {
 	mux.Handle("/metrics", http.TimeoutHandler(promhttp.Handler(), requestTimeout, "request timeout"))
 
 	s := &http.Server{
-		Addr:              fmt.Sprintf(":%d", *serverPort),
+		Addr:              fmt.Sprintf("%s:%d", *serverHost, *serverPort),
 		Handler:           mux,
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 
 	go func() {
-		log.Logger.Infof("Starting admin server on port '%v'.", *serverPort)
+		log.Logger.Infof("Starting admin server on '%s:%v'.", *serverHost, *serverPort)
 		if err := s.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Logger.With(zap.Error(err)).Fatalf("Failed to start admin server.")
 		}
