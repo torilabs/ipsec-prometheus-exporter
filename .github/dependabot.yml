@@ -4,14 +4,10 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-    reviewers:
-      - "torilabs"
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
       interval: "weekly"
-    reviewers:
-      - "torilabs"
     ignore:
       - dependency-name: "golang"
         update-types: ["version-update:semver-minor"]
@@ -19,5 +15,3 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-    reviewers:
-      - "torilabs"
