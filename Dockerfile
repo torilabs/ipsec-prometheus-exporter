@@ -11,7 +11,7 @@ ADD . .
 RUN make build
 
 # Runtime image
-FROM alpine:3.22.0
+FROM alpine:3.22.1
 WORKDIR /
 
 COPY --from=builder /workspace/ipsec-prometheus-exporter .
