@@ -36,6 +36,8 @@ jobs:
           GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -v -o "dist/${{ env.BINARY_NAME }}"
         fi
         tar -czvf ${{ env.BINARY_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz -C dist/ .
+      env:
+        CGO_ENABLED: 0
 
     - name: Upload binary to release
       uses: softprops/action-gh-release@v2
