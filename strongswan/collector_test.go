@@ -1,27 +1,49 @@
 package strongswan
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"errors"
 	"fmt"
+	"math"
+	"math/big"
+	"net"
+	"net/url"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/prometheus/common/expfmt"
 	"github.com/stretchr/testify/require"
 	"github.com/strongswan/govici/vici"
 )
 
 type fakeViciClient struct {
-	err            error
-	msgs           []*vici.Message
+	sasErr         error
+	sasMsgs        []*vici.Message
+	crtsErr        error
+	crtsMsgs       []*vici.Message
 	closeTriggered int
 }
 
+const (
+	crtExpireTimeMetricName          = "strongswan_crt_expire_secs"
+	crtExpireAllowedDiffFromExpected = 60.0
+)
+
 func (fvc *fakeViciClient) StreamedCommandRequest(cmd string, event string, _ *vici.Message) ([]*vici.Message, error) {
-	if cmd != "list-sas" || event != "list-sa" {
-		return nil, errors.New("invalid command")
+	if cmd == "list-sas" && event == "list-sa" {
+		return fvc.sasMsgs, fvc.sasErr
+	} else if cmd == "list-certs" && event == "list-cert" {
+		return fvc.crtsMsgs, fvc.crtsErr
 	}
-	return fvc.msgs, fvc.err
+
+	return nil, errors.New("invalid command")
 }
 
 func (fvc *fakeViciClient) Close() error {
@@ -31,37 +53,85 @@ func (fvc *fakeViciClient) Close() error {
 
 func TestCollector_Metrics(t *testing.T) {
 	tests := []struct {
-		name              string
-		viciClientErr     error
-		msgsModifierFn    func(msgs *vici.Message)
-		viciSessionErr    error
-		metricName        string
-		wantMetricsHelp   string
-		wantMetricsType   string
-		wantMetricsLabels string
-		wantMetricsValue  int
-		wantMetricsCount  int
+		name               string
+		viciClientErr      error
+		sasMsgsModifierFn  func(msgs *vici.Message)
+		crtsMsgsModifierFn func() []*vici.Message
+		viciSasSessionErr  error
+		viciCrtsSessionErr error
+		metricName         string
+		wantMetricsHelp    string
+		wantMetricsType    string
+		wantMetricsLabels  string
+		wantMetricsValue   int
+		wantMetricsCount   int
 	}{
 		{
-			name:             "connection error",
+			name:             "connection error ike count",
 			viciClientErr:    errors.New("some error"),
 			metricName:       "strongswan_ike_count",
 			wantMetricsHelp:  "Number of known IKEs",
 			wantMetricsType:  "gauge",
 			wantMetricsValue: 0,
-			wantMetricsCount: 1,
+			wantMetricsCount: 2,
 		},
 		{
-			name:             "empty result",
+			name:             "connection error crt count",
+			viciClientErr:    errors.New("some error"),
+			metricName:       "strongswan_crt_count",
+			wantMetricsHelp:  "Number of X509 certificates",
+			wantMetricsType:  "gauge",
+			wantMetricsValue: 0,
+			wantMetricsCount: 2,
+		},
+		{
+			name:              "session error ike count",
+			viciSasSessionErr: errors.New("some error"),
+			metricName:        "strongswan_ike_count",
+			wantMetricsHelp:   "Number of known IKEs",
+			wantMetricsType:   "gauge",
+			wantMetricsValue:  0,
+			wantMetricsCount:  2,
+		},
+		{
+			name:               "session error crt count",
+			viciCrtsSessionErr: errors.New("some error"),
+			metricName:         "strongswan_crt_count",
+			wantMetricsHelp:    "Number of X509 certificates",
+			wantMetricsType:    "gauge",
+			wantMetricsValue:   0,
+			wantMetricsCount:   2,
+		},
+		{
+			name:             "empty result ike count",
 			metricName:       "strongswan_ike_count",
 			wantMetricsHelp:  "Number of known IKEs",
 			wantMetricsType:  "gauge",
 			wantMetricsValue: 0,
-			wantMetricsCount: 1,
+			wantMetricsCount: 2,
 		},
 		{
-			name: "error vici msgs",
-			msgsModifierFn: func(msgs *vici.Message) {
+			name:             "empty list crt count",
+			metricName:       "strongswan_crt_count",
+			wantMetricsHelp:  "Number of X509 certificates",
+			wantMetricsType:  "gauge",
+			wantMetricsValue: 0,
+			wantMetricsCount: 2,
+		},
+		{
+			name: "empty result crt count",
+			crtsMsgsModifierFn: func() []*vici.Message {
+				return []*vici.Message{vici.NewMessage()}
+			},
+			metricName:       "strongswan_crt_count",
+			wantMetricsHelp:  "Number of X509 certificates",
+			wantMetricsType:  "gauge",
+			wantMetricsValue: 0,
+			wantMetricsCount: 2,
+		},
+		{
+			name: "error vici msgs ike count",
+			sasMsgsModifierFn: func(msgs *vici.Message) {
 				msgs.Set("success", "no")
 				msgs.Set("errmsg", "some error")
 			},
@@ -69,22 +139,36 @@ func TestCollector_Metrics(t *testing.T) {
 			wantMetricsHelp:  "Number of known IKEs",
 			wantMetricsType:  "gauge",
 			wantMetricsValue: 0,
-			wantMetricsCount: 1,
+			wantMetricsCount: 2,
+		},
+		{
+			name: "error vici msgs crt count",
+			crtsMsgsModifierFn: func() []*vici.Message {
+				crtMsg := vici.NewMessage()
+				crtMsg.Set("success", "no")
+				crtMsg.Set("errmsg", "some error")
+				return []*vici.Message{crtMsg}
+			},
+			metricName:       "strongswan_crt_count",
+			wantMetricsHelp:  "Number of X509 certificates",
+			wantMetricsType:  "gauge",
+			wantMetricsValue: 0,
+			wantMetricsCount: 2,
 		},
 		{
 			name: "one ike count",
-			msgsModifierFn: func(msgs *vici.Message) {
+			sasMsgsModifierFn: func(msgs *vici.Message) {
 				msgs.Set("ike-name", vici.NewMessage())
 			},
 			metricName:       "strongswan_ike_count",
 			wantMetricsHelp:  "Number of known IKEs",
 			wantMetricsType:  "gauge",
 			wantMetricsValue: 1,
-			wantMetricsCount: 14,
+			wantMetricsCount: 15,
 		},
 		{
 			name: "two ike count",
-			msgsModifierFn: func(msgs *vici.Message) {
+			sasMsgsModifierFn: func(msgs *vici.Message) {
 				msgs.Set("ike-name1", vici.NewMessage())
 				msgs.Set("ike-name2", vici.NewMessage())
 			},
@@ -92,11 +176,11 @@ func TestCollector_Metrics(t *testing.T) {
 			wantMetricsHelp:  "Number of known IKEs",
 			wantMetricsType:  "gauge",
 			wantMetricsValue: 2,
-			wantMetricsCount: 27,
+			wantMetricsCount: 28,
 		},
 		{
 			name: "ike version & name & uniqueid",
-			msgsModifierFn: func(msgs *vici.Message) {
+			sasMsgsModifierFn: func(msgs *vici.Message) {
 				ikeMsg := vici.NewMessage()
 				ikeMsg.Set("version", 5)
 				ikeMsg.Set("uniqueid", "some-unique-id")
@@ -107,11 +191,11 @@ func TestCollector_Metrics(t *testing.T) {
 			wantMetricsType:   "gauge",
 			wantMetricsLabels: `ike_id="some-unique-id",ike_name="ike-name"`,
 			wantMetricsValue:  5,
-			wantMetricsCount:  14,
+			wantMetricsCount:  15,
 		},
 		{
 			name: "ike status",
-			msgsModifierFn: func(msgs *vici.Message) {
+			sasMsgsModifierFn: func(msgs *vici.Message) {
 				ikeMsg := vici.NewMessage()
 				ikeMsg.Set("state", "ESTABLISHED")
 				ikeMsg.Set("uniqueid", "some-unique-id")
@@ -122,11 +206,11 @@ func TestCollector_Metrics(t *testing.T) {
 			wantMetricsType:   "gauge",
 			wantMetricsLabels: `ike_id="some-unique-id",ike_name="ike-name"`,
 			wantMetricsValue:  1,
-			wantMetricsCount:  14,
+			wantMetricsCount:  15,
 		},
 		{
 			name: "ike initiator",
-			msgsModifierFn: func(msgs *vici.Message) {
+			sasMsgsModifierFn: func(msgs *vici.Message) {
 				ikeMsg := vici.NewMessage()
 				ikeMsg.Set("initiator", "yes")
 				ikeMsg.Set("uniqueid", "some-unique-id")
@@ -137,11 +221,11 @@ func TestCollector_Metrics(t *testing.T) {
 			wantMetricsType:   "gauge",
 			wantMetricsLabels: `ike_id="some-unique-id",ike_name="ike-name"`,
 			wantMetricsValue:  1,
-			wantMetricsCount:  14,
+			wantMetricsCount:  15,
 		},
 		{
 			name: "ike NAT local",
-			msgsModifierFn: func(msgs *vici.Message) {
+			sasMsgsModifierFn: func(msgs *vici.Message) {
 				ikeMsg := vici.NewMessage()
 				ikeMsg.Set("nat-local", "yes")
 				ikeMsg.Set("uniqueid", "some-unique-id")
@@ -152,11 +236,11 @@ func TestCollector_Metrics(t *testing.T) {
 			wantMetricsType:   "gauge",
 			wantMetricsLabels: `ike_id="some-unique-id",ike_name="ike-name"`,
 			wantMetricsValue:  1,
-			wantMetricsCount:  14,
+			wantMetricsCount:  15,
 		},
 		{
 			name: "ike NAT remote",
-			msgsModifierFn: func(msgs *vici.Message) {
+			sasMsgsModifierFn: func(msgs *vici.Message) {
 				ikeMsg := vici.NewMessage()
 				ikeMsg.Set("nat-remote", "yes")
 				ikeMsg.Set("uniqueid", "some-unique-id")
@@ -167,11 +251,11 @@ func TestCollector_Metrics(t *testing.T) {
 			wantMetricsType:   "gauge",
 			wantMetricsLabels: `ike_id="some-unique-id",ike_name="ike-name"`,
 			wantMetricsValue:  1,
-			wantMetricsCount:  14,
+			wantMetricsCount:  15,
 		},
 		{
 			name: "ike NAT fake",
-			msgsModifierFn: func(msgs *vici.Message) {
+			sasMsgsModifierFn: func(msgs *vici.Message) {
 				ikeMsg := vici.NewMessage()
 				ikeMsg.Set("nat-fake", "yes")
 				ikeMsg.Set("uniqueid", "some-unique-id")
@@ -182,11 +266,11 @@ func TestCollector_Metrics(t *testing.T) {
 			wantMetricsType:   "gauge",
 			wantMetricsLabels: `ike_id="some-unique-id",ike_name="ike-name"`,
 			wantMetricsValue:  1,
-			wantMetricsCount:  14,
+			wantMetricsCount:  15,
 		},
 		{
 			name: "ike NAT any",
-			msgsModifierFn: func(msgs *vici.Message) {
+			sasMsgsModifierFn: func(msgs *vici.Message) {
 				ikeMsg := vici.NewMessage()
 				ikeMsg.Set("nat-any", "yes")
 				ikeMsg.Set("uniqueid", "some-unique-id")
@@ -197,11 +281,11 @@ func TestCollector_Metrics(t *testing.T) {
 			wantMetricsType:   "gauge",
 			wantMetricsLabels: `ike_id="some-unique-id",ike_name="ike-name"`,
 			wantMetricsValue:  1,
-			wantMetricsCount:  14,
+			wantMetricsCount:  15,
 		},
 		{
 			name: "ike encryption key",
-			msgsModifierFn: func(msgs *vici.Message) {
+			sasMsgsModifierFn: func(msgs *vici.Message) {
 				ikeMsg := vici.NewMessage()
 				ikeMsg.Set("encr-keysize", "1024")
 				ikeMsg.Set("encr-alg", "SHA-256")
@@ -214,11 +298,11 @@ func TestCollector_Metrics(t *testing.T) {
 			wantMetricsType:   "gauge",
 			wantMetricsLabels: `algorithm="SHA-256",dh_group="DH",ike_id="some-unique-id",ike_name="ike-name"`,
 			wantMetricsValue:  1024,
-			wantMetricsCount:  14,
+			wantMetricsCount:  15,
 		},
 		{
 			name: "ike integrity key",
-			msgsModifierFn: func(msgs *vici.Message) {
+			sasMsgsModifierFn: func(msgs *vici.Message) {
 				ikeMsg := vici.NewMessage()
 				ikeMsg.Set("integ-keysize", "1024")
 				ikeMsg.Set("integ-alg", "SHA-256")
@@ -231,11 +315,11 @@ func TestCollector_Metrics(t *testing.T) {
 			wantMetricsType:   "gauge",
 			wantMetricsLabels: `algorithm="SHA-256",dh_group="DH",ike_id="some-unique-id",ike_name="ike-name"`,
 			wantMetricsValue:  1024,
-			wantMetricsCount:  14,
+			wantMetricsCount:  15,
 		},
 		{
 			name: "ike established",
-			msgsModifierFn: func(msgs *vici.Message) {
+			sasMsgsModifierFn: func(msgs *vici.Message) {
 				ikeMsg := vici.NewMessage()
 				ikeMsg.Set("established", "565")
 				ikeMsg.Set("uniqueid", "some-unique-id")
@@ -246,11 +330,11 @@ func TestCollector_Metrics(t *testing.T) {
 			wantMetricsType:   "gauge",
 			wantMetricsLabels: `ike_id="some-unique-id",ike_name="ike-name"`,
 			wantMetricsValue:  565,
-			wantMetricsCount:  14,
+			wantMetricsCount:  15,
 		},
 		{
 			name: "ike rekey",
-			msgsModifierFn: func(msgs *vici.Message) {
+			sasMsgsModifierFn: func(msgs *vici.Message) {
 				ikeMsg := vici.NewMessage()
 				ikeMsg.Set("rekey-time", "12")
 				ikeMsg.Set("uniqueid", "some-unique-id")
@@ -261,11 +345,11 @@ func TestCollector_Metrics(t *testing.T) {
 			wantMetricsType:   "gauge",
 			wantMetricsLabels: `ike_id="some-unique-id",ike_name="ike-name"`,
 			wantMetricsValue:  12,
-			wantMetricsCount:  14,
+			wantMetricsCount:  15,
 		},
 		{
 			name: "ike reauth",
-			msgsModifierFn: func(msgs *vici.Message) {
+			sasMsgsModifierFn: func(msgs *vici.Message) {
 				ikeMsg := vici.NewMessage()
 				ikeMsg.Set("reauth-time", "15")
 				ikeMsg.Set("uniqueid", "some-unique-id")
@@ -276,11 +360,11 @@ func TestCollector_Metrics(t *testing.T) {
 			wantMetricsType:   "gauge",
 			wantMetricsLabels: `ike_id="some-unique-id",ike_name="ike-name"`,
 			wantMetricsValue:  15,
-			wantMetricsCount:  14,
+			wantMetricsCount:  15,
 		},
 		{
 			name: "ike children",
-			msgsModifierFn: func(msgs *vici.Message) {
+			sasMsgsModifierFn: func(msgs *vici.Message) {
 				childMsg1 := vici.NewMessage()
 				childMsg1.Set("uniqueid", "child1-unique-id")
 				childMsg2 := vici.NewMessage()
@@ -298,17 +382,151 @@ func TestCollector_Metrics(t *testing.T) {
 			wantMetricsType:   "gauge",
 			wantMetricsLabels: `ike_id="some-unique-id",ike_name="ike-name"`,
 			wantMetricsValue:  2,
-			wantMetricsCount:  40,
+			wantMetricsCount:  41,
+		},
+		{
+			name: "ignore certs other than X509",
+			crtsMsgsModifierFn: func() []*vici.Message {
+				crtMsg := vici.NewMessage()
+				crtMsg.Set("type", "OCSP_RESPONSE")
+				return []*vici.Message{crtMsg}
+			},
+			metricName:       "strongswan_crt_count",
+			wantMetricsHelp:  "Number of X509 certificates",
+			wantMetricsType:  "gauge",
+			wantMetricsValue: 0,
+			wantMetricsCount: 2,
+		},
+		{
+			name: "ignore certs with data",
+			crtsMsgsModifierFn: func() []*vici.Message {
+				crtMsg1 := vici.NewMessage()
+				crtMsg1.Set("type", "X509")
+				crtMsg1.Set("data", "123")
+
+				crtMsg2 := vici.NewMessage()
+				crtMsg2.Set("type", "X509")
+				crt, err := createSingleX509Crt()
+				if err != nil {
+					return []*vici.Message{}
+				}
+				crtMsg2.Set("data", string(crt))
+
+				return []*vici.Message{crtMsg1, crtMsg2}
+			},
+			metricName:       "strongswan_crt_count",
+			wantMetricsHelp:  "Number of X509 certificates",
+			wantMetricsType:  "gauge",
+			wantMetricsValue: 1,
+			wantMetricsCount: 4,
+		},
+		{
+			name:               "one cert count",
+			crtsMsgsModifierFn: singleCertViciMessages(createSingleX509Crt),
+			metricName:         "strongswan_crt_count",
+			wantMetricsHelp:    "Number of X509 certificates",
+			wantMetricsType:    "gauge",
+			wantMetricsValue:   1,
+			wantMetricsCount:   4,
+		},
+		{
+			name: "two cert count",
+			crtsMsgsModifierFn: func() []*vici.Message {
+				crt1, crt2, err := createDoubleX509Crt()
+				if err != nil {
+					return []*vici.Message{}
+				}
+
+				crtMsg1 := vici.NewMessage()
+				crtMsg1.Set("type", "X509")
+				crtMsg1.Set("data", string(crt1))
+
+				crtMsg2 := vici.NewMessage()
+				crtMsg2.Set("type", "X509")
+				crtMsg2.Set("data", string(crt2))
+
+				return []*vici.Message{crtMsg1, crtMsg2}
+			},
+			metricName:       "strongswan_crt_count",
+			wantMetricsHelp:  "Number of X509 certificates",
+			wantMetricsType:  "gauge",
+			wantMetricsValue: 2,
+			wantMetricsCount: 6,
+		},
+		{
+			name:               "cert valid",
+			crtsMsgsModifierFn: singleCertViciMessages(createSingleX509Crt),
+			metricName:         "strongswan_crt_valid",
+			wantMetricsHelp:    "X509 certificate validity",
+			wantMetricsType:    "gauge",
+			wantMetricsLabels:  `alternate_names="",not_after="2124-01-01T12:00:00Z",not_before="2024-01-01T12:00:00Z",serial_number="1",subject="CN=Test,O=Org1"`,
+			wantMetricsValue:   1,
+			wantMetricsCount:   4,
+		},
+		{
+			name:               "cert expired",
+			crtsMsgsModifierFn: singleCertViciMessages(createExpiredX509Crt),
+			metricName:         "strongswan_crt_valid",
+			wantMetricsHelp:    "X509 certificate validity",
+			wantMetricsType:    "gauge",
+			wantMetricsLabels:  `alternate_names="",not_after="2024-12-01T12:00:00Z",not_before="2024-01-01T12:00:00Z",serial_number="1",subject="CN=Test,O=Org1"`,
+			wantMetricsValue:   0,
+			wantMetricsCount:   4,
+		},
+		{
+			name: "cert alternate names",
+			crtsMsgsModifierFn: func() []*vici.Message {
+				crtMsg := vici.NewMessage()
+				crtMsg.Set("type", "X509")
+
+				url1, err := url.Parse("https://test.org/foobar")
+				if err != nil {
+					return []*vici.Message{}
+				}
+				url2, err := url.Parse("https://test2.org/foobar2")
+				if err != nil {
+					return []*vici.Message{}
+				}
+
+				crt, err := createSingleX509CrtWithAlternateNames(
+					[]string{"test.org", "test2.org"},
+					[]string{"Name1", "Name2"},
+					[]net.IP{net.IPv4(192, 168, 0, 1), net.IPv4(192, 168, 1, 1)},
+					[]*url.URL{url1, url2},
+				)
+				if err != nil {
+					return []*vici.Message{}
+				}
+
+				crtMsg.Set("data", string(crt))
+				return []*vici.Message{crtMsg}
+			},
+			metricName:        "strongswan_crt_valid",
+			wantMetricsHelp:   "X509 certificate validity",
+			wantMetricsType:   "gauge",
+			wantMetricsLabels: `alternate_names="DNS=test.org+DNS=test2.org,EM=Name1+EM=Name2,IP=192.168.0.1+IP=192.168.1.1,URI=https://test.org/foobar+URI=https://test2.org/foobar2",not_after="2124-01-01T12:00:00Z",not_before="2024-01-01T12:00:00Z",serial_number="1",subject="CN=Test,O=Org1"`,
+			wantMetricsValue:  1,
+			wantMetricsCount:  4,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			msgs := vici.NewMessage()
-			if tt.msgsModifierFn != nil {
-				tt.msgsModifierFn(msgs)
+			sasMmsgs := vici.NewMessage()
+			if tt.sasMsgsModifierFn != nil {
+				tt.sasMsgsModifierFn(sasMmsgs)
+			}
+			crtsMmsgs := []*vici.Message{}
+			if tt.crtsMsgsModifierFn != nil {
+				crtsMmsgs = tt.crtsMsgsModifierFn()
 			}
 			c := NewCollector(func() (ViciClient, error) {
-				return &fakeViciClient{msgs: []*vici.Message{msgs}, err: tt.viciSessionErr}, tt.viciClientErr
+				return &fakeViciClient{
+						sasMsgs:  []*vici.Message{sasMmsgs},
+						sasErr:   tt.viciSasSessionErr,
+						crtsMsgs: crtsMmsgs,
+						crtsErr:  tt.viciCrtsSessionErr,
+					},
+					tt.viciClientErr
 			})
 
 			cnt := testutil.CollectAndCount(c)
@@ -325,7 +543,7 @@ func TestCollector_Metrics(t *testing.T) {
 	}
 }
 
-func TestCollector_MetricsChild(t *testing.T) {
+func TestCollector_MetricsSaChild(t *testing.T) {
 	tests := []struct {
 		name              string
 		msgModifierFn     func(msg *vici.Message)
@@ -511,11 +729,11 @@ func TestCollector_MetricsChild(t *testing.T) {
 			msgs := vici.NewMessage()
 			msgs.Set("ike-name", ikeMsg)
 			c := NewCollector(func() (ViciClient, error) {
-				return &fakeViciClient{msgs: []*vici.Message{msgs}}, nil
+				return &fakeViciClient{sasMsgs: []*vici.Message{msgs}}, nil
 			})
 
 			cnt := testutil.CollectAndCount(c)
-			require.Equal(t, 27, cnt, "metrics count")
+			require.Equal(t, 28, cnt, "metrics count")
 
 			wantMetricsContent := fmt.Sprintf(`# HELP %s %s
 # TYPE %s %s
@@ -526,4 +744,196 @@ func TestCollector_MetricsChild(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCollector_MetricsCrtExpireTime(t *testing.T) {
+	tz, err := time.LoadLocation("UTC")
+	if err != nil {
+		t.Errorf("failed to load timezone: %s", err)
+	}
+
+	tests := []struct {
+		name               string
+		crtsMsgsModifierFn func() []*vici.Message
+		wantMetricsLabels  string
+		wantMetricsValue   float64
+	}{
+		{
+			name:               "cert expire time for valid cert",
+			crtsMsgsModifierFn: singleCertViciMessages(createSingleX509Crt),
+			wantMetricsLabels:  `alternate_names="",not_after="2124-01-01T12:00:00Z",not_before="2024-01-01T12:00:00Z",serial_number="1",subject="CN=Test,O=Org1"`,
+			wantMetricsValue:   time.Until(time.Date(2124, 1, 1, 12, 0, 0, 0, tz)).Seconds(),
+		},
+		{
+			name:               "cert expire time for expired cert",
+			crtsMsgsModifierFn: singleCertViciMessages(createExpiredX509Crt),
+			wantMetricsLabels:  `alternate_names="",not_after="2024-12-01T12:00:00Z",not_before="2024-01-01T12:00:00Z",serial_number="1",subject="CN=Test,O=Org1"`,
+			wantMetricsValue:   time.Until(time.Date(2024, 12, 1, 12, 0, 0, 0, tz)).Seconds(),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			crtsMmsgs := []*vici.Message{}
+			if tt.crtsMsgsModifierFn != nil {
+				crtsMmsgs = tt.crtsMsgsModifierFn()
+			}
+			c := NewCollector(func() (ViciClient, error) {
+				return &fakeViciClient{
+						crtsMsgs: crtsMmsgs,
+					},
+					nil
+			})
+
+			cnt := testutil.CollectAndCount(c)
+			const wantMetricsCount = 4
+			require.Equal(t, wantMetricsCount, cnt, "metrics count")
+
+			metricBytes, err := testutil.CollectAndFormat(c, expfmt.TypeTextPlain, crtExpireTimeMetricName)
+			if err != nil {
+				t.Fatalf("unexpected collecting result of '%s':\n%s", crtExpireTimeMetricName, err)
+			}
+
+			metricStr := strings.TrimSpace(string(metricBytes))
+			validateMetricsCrtExpireTimeValue(t, metricStr, tt.wantMetricsValue)
+			validateMetricsCrtExpireTimeLabels(t, metricStr, tt.wantMetricsLabels)
+		})
+	}
+}
+
+func validateMetricsCrtExpireTimeValue(t *testing.T, metricStr string, wantMetricsValue float64) {
+	metricFields := strings.Split(metricStr, " ")
+	if len(metricFields) == 0 {
+		t.Fatalf("unexpected format of metric '%s': %s", crtExpireTimeMetricName, metricStr)
+	}
+
+	metricValStr := metricFields[len(metricFields)-1]
+	metricVal, err := strconv.ParseFloat(metricValStr, 64)
+	if err != nil {
+		t.Fatalf("failure in parsing of metric's value '%s': %s\n%s", crtExpireTimeMetricName, metricValStr, err)
+	}
+
+	require.GreaterOrEqual(t, crtExpireAllowedDiffFromExpected, math.Abs(metricVal-wantMetricsValue), "seconds till cert expires value")
+}
+
+func validateMetricsCrtExpireTimeLabels(t *testing.T, metricStr, wantMetricsLabels string) {
+	labels := strings.Split(metricStr, "{")
+	if len(labels) < 2 {
+		t.Fatalf("unexpected format of metric '%s': %s", crtExpireTimeMetricName, metricStr)
+	}
+
+	labels = strings.Split(labels[1], "}")
+	require.Equal(t, labels[0], wantMetricsLabels, "seconds till cert expires labels")
+}
+
+func singleCertViciMessages(createX509CrtFn func() ([]byte, error)) func() []*vici.Message {
+	return func() []*vici.Message {
+		crtMsg := vici.NewMessage()
+		crtMsg.Set("type", "X509")
+
+		crt, err := createX509CrtFn()
+		if err != nil {
+			return []*vici.Message{}
+		}
+
+		crtMsg.Set("data", string(crt))
+		return []*vici.Message{crtMsg}
+	}
+}
+
+func createSingleX509Crt() ([]byte, error) {
+	return createSingleX509CrtWithAlternateNames([]string{}, []string{}, []net.IP{}, []*url.URL{})
+}
+
+func createSingleX509CrtWithAlternateNames(dnsNames []string, emailAddresses []string, ipAddresses []net.IP, uris []*url.URL) ([]byte, error) {
+	tz, err := time.LoadLocation("UTC")
+	if err != nil {
+		return nil, err
+	}
+
+	return createX509CrtWithAlternateNames(
+		pkix.Name{
+			Organization: []string{"Org1"},
+			CommonName:   "Test",
+		},
+		time.Date(2024, 1, 1, 12, 0, 0, 0, tz),
+		time.Date(2124, 1, 1, 12, 0, 0, 0, tz),
+		dnsNames,
+		emailAddresses,
+		ipAddresses,
+		uris,
+	)
+}
+
+func createDoubleX509Crt() ([]byte, []byte, error) {
+	tz, err := time.LoadLocation("UTC")
+	if err != nil {
+		return nil, nil, err
+	}
+
+	notBefore := time.Date(2024, 1, 1, 12, 0, 0, 0, tz)
+	notAfter := time.Date(2124, 1, 1, 12, 0, 0, 0, tz)
+
+	crt1, err := createX509Crt(
+		pkix.Name{
+			Organization: []string{"Org1"},
+			CommonName:   "Test1",
+		},
+		notBefore, notAfter,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	crt2, err := createX509Crt(
+		pkix.Name{
+			Organization: []string{"Org2"},
+			CommonName:   "Test2",
+		},
+		notBefore, notAfter,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return crt1, crt2, nil
+}
+
+func createExpiredX509Crt() ([]byte, error) {
+	tz, err := time.LoadLocation("UTC")
+	if err != nil {
+		return nil, err
+	}
+
+	return createX509Crt(
+		pkix.Name{
+			Organization: []string{"Org1"},
+			CommonName:   "Test",
+		},
+		time.Date(2024, 1, 1, 12, 0, 0, 0, tz),
+		time.Date(2024, 12, 1, 12, 0, 0, 0, tz),
+	)
+}
+
+func createX509Crt(subject pkix.Name, notBefore, notAfter time.Time) ([]byte, error) {
+	return createX509CrtWithAlternateNames(subject, notBefore, notAfter, []string{}, []string{}, []net.IP{}, []*url.URL{})
+}
+
+func createX509CrtWithAlternateNames(subject pkix.Name, notBefore, notAfter time.Time, dnsNames []string, emailAddresses []string, ipAddresses []net.IP, uris []*url.URL) ([]byte, error) {
+	priv, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+
+	template := x509.Certificate{
+		SerialNumber:   big.NewInt(1),
+		Subject:        subject,
+		DNSNames:       dnsNames,
+		EmailAddresses: emailAddresses,
+		IPAddresses:    ipAddresses,
+		URIs:           uris,
+		NotBefore:      notBefore,
+		NotAfter:       notAfter,
+	}
+
+	return x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
 }
