@@ -11,13 +11,7 @@ MAKEFLAGS += --no-print-directory
 prepare:
 	@echo "Downloading tools"
 ifeq (, $(shell which go-junit-report))
-	go install github.com/jstemmer/go-junit-report@latest
-endif
-ifeq (, $(shell which gocov))
-	go install github.com/axw/gocov/gocov@latest
-endif
-ifeq (, $(shell which gocov-xml))
-	go install github.com/AlekSi/gocov-xml@latest
+	go install github.com/jstemmer/go-junit-report/v2@latest
 endif
 
 check:
@@ -33,7 +27,6 @@ test: prepare
 	mkdir -p report
 	export CGO_ENABLED=1 && go test -race -v ./... -coverprofile=report/coverage.txt | tee report/report.txt
 	go-junit-report -set-exit-code < report/report.txt > report/report.xml
-	gocov convert report/coverage.txt | gocov-xml > report/coverage.xml
 	go mod tidy
 
 build:
