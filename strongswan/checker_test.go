@@ -35,7 +35,7 @@ func TestCollector_Check(t *testing.T) {
 			c := NewCollector(func() (ViciClient, error) {
 				viciClientFnCalls++
 				return fvc, tt.viciClientErr
-			})
+			}, false)
 			if err := c.Check(context.TODO()); (err != nil) != tt.wantErr {
 				t.Errorf("Check() error = %v, wantErr %v", err, tt.wantErr)
 			}

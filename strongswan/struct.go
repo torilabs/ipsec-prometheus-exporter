@@ -60,3 +60,12 @@ type ChildIkeSa struct {
 	LocalTS      []string `vici:"local-ts"`
 	RemoteTS     []string `vici:"remote-ts"`
 }
+
+/*
+Cert documentation: https://github.com/strongswan/strongswan/blob/master/src/libcharon/plugins/vici/README.md#list-cert
+*/
+type Cert struct {
+	Type  string `vici:"type"`
+	Flags string `vici:"flags"`
+	Data  string `vici:"data"`
+}

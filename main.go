@@ -29,11 +29,12 @@ const (
 )
 
 var (
-	serverHost  = flag.String("server-host", defaultServerHost, "Server bind host (default all interfaces)")
-	serverPort  = flag.Uint("server-port", defaultServerPort, "Server port")
-	logLevel    = flag.String("log-level", "info", "Log level")
-	viciNetwork = flag.String("vici-network", "tcp", "Vici network (tcp, udp or unix)")
-	viciAddr    = flag.String("vici-address", "localhost:4502", "Vici host and port or unix socket path")
+	serverHost         = flag.String("server-host", defaultServerHost, "Server bind host (default all interfaces)")
+	serverPort         = flag.Uint("server-port", defaultServerPort, "Server port")
+	logLevel           = flag.String("log-level", "info", "Log level")
+	viciNetwork        = flag.String("vici-network", "tcp", "Vici network (tcp, udp or unix)")
+	viciAddr           = flag.String("vici-address", "localhost:4502", "Vici host and port or unix socket path")
+	certMetricsEnabled = flag.Bool("enable-cert-metrics", false, "Enable X509 certificate metrics")
 )
 
 func main() {
@@ -60,7 +61,7 @@ func run() (err error) {
 		}
 		return s, err
 	}
-	cl := strongswan.NewCollector(viciClientFn)
+	cl := strongswan.NewCollector(viciClientFn, *certMetricsEnabled)
 
 	checkers := make([]healthcheck.Option, 0)
 	checkers = append(checkers, healthcheck.WithChecker("vici", cl))

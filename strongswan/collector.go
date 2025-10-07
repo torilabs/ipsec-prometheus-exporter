@@ -1,8 +1,11 @@
 package strongswan
 
 import (
+	"time"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/strongswan/govici/vici"
+	"github.com/torilabs/ipsec-prometheus-exporter/log"
 )
 
 type ViciClient interface {
@@ -14,21 +17,33 @@ type viciClientFn func() (ViciClient, error)
 
 type Collector struct {
 	viciClientFn viciClientFn
-	sasCollector prometheus.Collector
+	cs           []prometheus.Collector
 }
 
-func NewCollector(viciClientFn viciClientFn) *Collector {
+func NewCollector(viciClientFn viciClientFn, certMetricsEnabled bool) *Collector {
 	prefix := "strongswan_"
+	cs := []prometheus.Collector{
+		NewSasCollector(prefix, viciClientFn),
+	}
+	if certMetricsEnabled {
+		log.Logger.Info("Certificate metrics enabled.")
+		cs = append(cs, NewCertsCollector(prefix, viciClientFn, time.Now))
+	}
+
 	return &Collector{
 		viciClientFn: viciClientFn,
-		sasCollector: NewSasCollector(prefix, viciClientFn),
+		cs:           cs,
 	}
 }
 
 func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
-	c.sasCollector.Describe(ch)
+	for _, sc := range c.cs {
+		sc.Describe(ch)
+	}
 }
 
 func (c *Collector) Collect(ch chan<- prometheus.Metric) {
-	c.sasCollector.Collect(ch)
+	for _, sc := range c.cs {
+		sc.Collect(ch)
+	}
 }

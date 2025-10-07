@@ -13,15 +13,19 @@ import (
 
 type fakeViciClient struct {
 	err            error
-	msgs           []*vici.Message
+	saMsgs         []*vici.Message
+	certMsgs       []*vici.Message
 	closeTriggered int
 }
 
 func (fvc *fakeViciClient) StreamedCommandRequest(cmd string, event string, _ *vici.Message) ([]*vici.Message, error) {
-	if cmd != "list-sas" || event != "list-sa" {
-		return nil, errors.New("invalid command")
+	if cmd == "list-sas" && event == "list-sa" {
+		return fvc.saMsgs, fvc.err
 	}
-	return fvc.msgs, fvc.err
+	if cmd == "list-certs" && event == "list-cert" {
+		return fvc.certMsgs, fvc.err
+	}
+	return nil, errors.New("invalid command")
 }
 
 func (fvc *fakeViciClient) Close() error {
@@ -60,7 +64,7 @@ func TestSasCollector_Metrics(t *testing.T) {
 			wantMetricsCount: 1,
 		},
 		{
-			name: "error vici msgs",
+			name: "error vici saMsgs",
 			msgsModifierFn: func(msgs *vici.Message) {
 				msgs.Set("success", "no")
 				msgs.Set("errmsg", "some error")
@@ -308,7 +312,7 @@ func TestSasCollector_Metrics(t *testing.T) {
 				tt.msgsModifierFn(msgs)
 			}
 			c := NewSasCollector("swtest_", func() (ViciClient, error) {
-				return &fakeViciClient{msgs: []*vici.Message{msgs}, err: tt.viciSessionErr}, tt.viciClientErr
+				return &fakeViciClient{saMsgs: []*vici.Message{msgs}, err: tt.viciSessionErr}, tt.viciClientErr
 			})
 
 			cnt := testutil.CollectAndCount(c)
@@ -511,7 +515,7 @@ func TestSasCollector_MetricsChild(t *testing.T) {
 			msgs := vici.NewMessage()
 			msgs.Set("ike-name", ikeMsg)
 			c := NewSasCollector("swtest_", func() (ViciClient, error) {
-				return &fakeViciClient{msgs: []*vici.Message{msgs}}, nil
+				return &fakeViciClient{saMsgs: []*vici.Message{msgs}}, nil
 			})
 
 			cnt := testutil.CollectAndCount(c)
