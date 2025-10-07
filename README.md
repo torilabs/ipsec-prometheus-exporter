@@ -1,6 +1,6 @@
 # IPSec Prometheus Exporter
 
-_The IPSec Prometheus exporter subscribes to the strongSwan via Vici API and exposes [Security Associations](https://github.com/strongswan/strongswan/blob/master/src/libcharon/plugins/vici/README.md#list-sa) (SAs) metrics._
+_The IPSec Prometheus exporter subscribes to the strongSwan via Vici API and exposes [Security Associations](https://github.com/strongswan/strongswan/blob/master/src/libcharon/plugins/vici/README.md#list-sa) (SAs) metrics. Optionally [X509 certificate](https://github.com/strongswan/strongswan/blob/master/src/libcharon/plugins/vici/README.md#list-certs) metrics can be turned on._
 
 Collected metrics (together with application metrics) are exposed on `/metrics` endpoint. Prometheus target is then configured with this endpoint and port e.g. `http://localhost:8079/metrics`.
 
@@ -20,6 +20,7 @@ Options and default values:
 --vici-network=tcp              Vici network scheme (tcp, udp, unix)
 --vici-address=localhost:4502   IP address or hostname with a port or unix socket path
                                 IPv6 is supported. Use address in format of "[fd12:3456:789a::1]:4502"
+--enable-cert-metrics=false     Enable collecting of X509 certificate metrics (true, false)
 ```
 
 ## Value Definition
@@ -39,7 +40,7 @@ make build
 
 Run the binary with optional arguments provided:
 ```bash
-./ipsec-prometheus-exporter [--server-port=8079] [--server-host=""] [--log-level=info] [--vici-network=tcp] [--vici-address=localhost:4502]
+./ipsec-prometheus-exporter [--server-port=8079] [--server-host=""] [--log-level=info] [--vici-network=tcp] [--vici-address=localhost:4502] [--enable-cert-metrics=false]
 ```
 
 ## Docker image

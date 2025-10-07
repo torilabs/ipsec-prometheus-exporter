@@ -50,7 +50,7 @@ type SasCollector struct {
 	saLifetimeSecs  *prometheus.Desc
 }
 
-func NewSasCollector(prefix string, viciClientFn viciClientFn) *SasCollector {
+func NewSasCollector(prefix string, viciClientFn viciClientFn) prometheus.Collector {
 	return &SasCollector{
 		viciClientFn: viciClientFn,
 
