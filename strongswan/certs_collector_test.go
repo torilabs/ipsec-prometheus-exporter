@@ -4,6 +4,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"strings"
 	"testing"
@@ -117,7 +118,7 @@ func TestCertsCollector_Metrics(t *testing.T) {
 			metricName:        "swtest_cert_valid",
 			wantMetricsHelp:   "X509 certificate validity",
 			wantMetricsType:   "gauge",
-			wantMetricsLabels: `not_after="2034-03-20T15:01:04Z",not_before="2024-03-20T15:01:04Z",serial_number="7163059870015454684",subject="CN=Cyber Root CA,O=Cyber,C=CH"`,
+			wantMetricsLabels: `not_after="2034-03-20T15:01:04Z",not_before="2024-03-20T15:01:04Z",serial_number="63:68:4d:00:11:20:7d:dc",subject="CN=Cyber Root CA,O=Cyber,C=CH"`,
 			wantMetricsValue:  1,
 			wantMetricsCount:  3,
 		},
@@ -134,7 +135,7 @@ func TestCertsCollector_Metrics(t *testing.T) {
 			metricName:        "swtest_cert_valid",
 			wantMetricsHelp:   "X509 certificate validity",
 			wantMetricsType:   "gauge",
-			wantMetricsLabels: `not_after="2025-10-22T18:59:10Z",not_before="2025-10-21T18:59:10Z",serial_number="15035583624488368264",subject="CN=expired.example.local"`,
+			wantMetricsLabels: `not_after="2025-10-22T18:59:10Z",not_before="2025-10-21T18:59:10Z",serial_number="d0:a9:1f:a5:00:4f:38:88",subject="CN=expired.example.local"`,
 			wantMetricsValue:  0,
 			wantMetricsCount:  3,
 		},
@@ -151,7 +152,7 @@ func TestCertsCollector_Metrics(t *testing.T) {
 			metricName:        "swtest_cert_expire_secs",
 			wantMetricsHelp:   "Seconds until the X509 certificate expires",
 			wantMetricsType:   "gauge",
-			wantMetricsLabels: `not_after="2034-03-20T15:01:04Z",not_before="2024-03-20T15:01:04Z",serial_number="7163059870015454684",subject="CN=Cyber Root CA,O=Cyber,C=CH"`,
+			wantMetricsLabels: `not_after="2034-03-20T15:01:04Z",not_before="2024-03-20T15:01:04Z",serial_number="63:68:4d:00:11:20:7d:dc",subject="CN=Cyber Root CA,O=Cyber,C=CH"`,
 			wantMetricsValue:  25264,
 			wantMetricsCount:  3,
 		},
@@ -168,7 +169,7 @@ func TestCertsCollector_Metrics(t *testing.T) {
 			metricName:        "swtest_cert_expire_secs",
 			wantMetricsHelp:   "Seconds until the X509 certificate expires",
 			wantMetricsType:   "gauge",
-			wantMetricsLabels: `not_after="2025-10-22T18:59:10Z",not_before="2025-10-21T18:59:10Z",serial_number="15035583624488368264",subject="CN=expired.example.local"`,
+			wantMetricsLabels: `not_after="2025-10-22T18:59:10Z",not_before="2025-10-21T18:59:10Z",serial_number="d0:a9:1f:a5:00:4f:38:88",subject="CN=expired.example.local"`,
 			wantMetricsValue:  -18050,
 			wantMetricsCount:  3,
 		},
@@ -194,6 +195,51 @@ func TestCertsCollector_Metrics(t *testing.T) {
 			if err := testutil.CollectAndCompare(c, strings.NewReader(wantMetricsContent), tt.metricName); err != nil {
 				t.Errorf("unexpected collecting result of '%s':\n%s", tt.metricName, err)
 			}
+		})
+	}
+}
+
+func TestFormatSerialNumber(t *testing.T) {
+	tests := []struct {
+		name string
+		sn   *big.Int
+		want string
+	}{
+		{
+			name: "Nil Serial Number",
+			sn:   nil,
+			want: "",
+		},
+		{
+			name: "Zero Value",
+			sn:   big.NewInt(0),
+			want: "00",
+		},
+		{
+			name: "Single Hex Digit Value",
+			sn:   big.NewInt(10), // "0xa"
+			want: "0a",
+		},
+		{
+			name: "Odd Number of Hex Digits",
+			sn:   big.NewInt(291), // "0x123"
+			want: "01:23",
+		},
+		{
+			name: "Even Number of Hex Digits",
+			sn:   big.NewInt(48879), // "0xbeef"
+			want: "be:ef",
+		},
+		{
+			name: "Longer Even Hex String",
+			sn:   big.NewInt(11259375), // "0xabcdef"
+			want: "ab:cd:ef",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, formatSerialNumber(tt.sn), "Serial Number format")
 		})
 	}
 }

@@ -2,6 +2,9 @@ package strongswan
 
 import (
 	"crypto/x509"
+	"fmt"
+	"math/big"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -91,7 +94,7 @@ func (c *CertsCollector) collectCertMetrics(certs []Cert, ch chan<- prometheus.M
 		expireIn := cert.NotAfter.Sub(now).Seconds()
 
 		labels := []string{
-			cert.SerialNumber.String(),
+			formatSerialNumber(cert.SerialNumber),
 			cert.Subject.String(),
 			cert.NotBefore.Format(time.RFC3339),
 			cert.NotAfter.Format(time.RFC3339),
@@ -149,4 +152,30 @@ func (c *CertsCollector) listCerts() ([]Cert, error) {
 	}
 
 	return certs, nil
+}
+
+func formatHexStrWithColons(hexStr string) string {
+	if len(hexStr)%2 != 0 {
+		hexStr = "0" + hexStr
+	}
+
+	var formatted strings.Builder
+	for i, r := range hexStr {
+		if i > 0 && i%2 == 0 {
+			formatted.WriteRune(':')
+		}
+
+		formatted.WriteRune(r)
+	}
+
+	return formatted.String()
+}
+
+func formatSerialNumber(sn *big.Int) string {
+	if sn == nil {
+		return ""
+	}
+
+	hexStr := fmt.Sprintf("%x", sn)
+	return formatHexStrWithColons(hexStr)
 }
