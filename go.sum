@@ -32,8 +32,8 @@ github.com/rogpeppe/go-internal v1.10.0 h1:TMyTOH3F/DB16zRVcYyreMH6GnZZrwQVAoYjR
 github.com/rogpeppe/go-internal v1.10.0/go.mod h1:UQnix2H7Ngw/k4C5ijL5+65zddjncjaFoBhdsK/akog=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
-github.com/strongswan/govici v0.7.0 h1:m0BaL5hY+2khnQZYDaKJkd4Ji1jFrNzS0fg+GQS7QnE=
-github.com/strongswan/govici v0.7.0/go.mod h1:WvC3Lo9kEzjxUb5xNe2B4NczQpa7+cZMIy2x8eZLzSE=
+github.com/strongswan/govici v0.8.1 h1:nOjhLt4zMrdW/y5dBixNLJnTKMXaapGB4kAinZFdhsE=
+github.com/strongswan/govici v0.8.1/go.mod h1:Auq9H2J1gSMD3D+r2g9HlUpF5tep/wP0u0fMCfBE+Bw=
 go.uber.org/goleak v1.3.0 h1:2K3zAYmnTNqV73imy9J1T3WC+gmCePx2hEGkimedGto=
 go.uber.org/goleak v1.3.0/go.mod h1:CoHD4mav9JJNrW/WLlf7HGZPjdw8EucARQHekz1X6bE=
 go.uber.org/multierr v1.10.0 h1:S0h4aNzvfcFsC3dRF1jLoaov7oRaKqRGC/pUEJ2yvPQ=
