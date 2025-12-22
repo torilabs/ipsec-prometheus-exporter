@@ -6,6 +6,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/strongswan/govici/vici"
 	"github.com/torilabs/ipsec-prometheus-exporter/log"
+	"go.uber.org/zap"
 )
 
 type connectionStatus int
@@ -225,8 +226,9 @@ func (c *SasCollector) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (c *SasCollector) Collect(ch chan<- prometheus.Metric) {
-	sas, err := c.listSas()
+	client, err := c.viciClientFn()
 	if err != nil {
+		log.Logger.Error("Failed to get VICI client", zap.Error(err))
 		ch <- prometheus.MustNewConstMetric(
 			c.ikeCnt,
 			prometheus.GaugeValue,
@@ -234,15 +236,131 @@ func (c *SasCollector) Collect(ch chan<- prometheus.Metric) {
 		)
 		return
 	}
+	defer client.Close()
+
+	// Get active SAs (original logic)
+	sas, err := c.listSas()
+	if err != nil {
+		log.Logger.Error("Failed to list SAs", zap.Error(err))
+		ch <- prometheus.MustNewConstMetric(
+			c.ikeCnt,
+			prometheus.GaugeValue,
+			float64(0),
+		)
+		return
+	}
+	activeNames := make(map[string]struct{})
+	for _, ikeSa := range sas {
+		activeNames[ikeSa.Name] = struct{}{}
+		c.collectIkeMetrics(ikeSa, ch)
+		for _, child := range ikeSa.Children {
+			c.collectIkeChildMetrics(ikeSa.Name, ikeSa.UniqueID, child, ch)
+		}
+	}
 	ch <- prometheus.MustNewConstMetric(
 		c.ikeCnt,
 		prometheus.GaugeValue,
 		float64(len(sas)),
 	)
-	for _, ikeSa := range sas {
-		c.collectIkeMetrics(ikeSa, ch)
-		for _, child := range ikeSa.Children {
-			c.collectIkeChildMetrics(ikeSa.Name, ikeSa.UniqueID, child, ch)
+
+	// Get loaded connections
+	loadedConns := make(map[string]struct{})
+	connMsgs, err := client.StreamedCommandRequest("list-conns", "list-conn", nil)
+	if err != nil {
+		log.Logger.Error("Failed to list-conns", zap.Error(err))
+		return
+	}
+	for _, msg := range connMsgs {
+		for _, connName := range msg.Keys() {
+			loadedConns[connName] = struct{}{}
+		}
+	}
+
+	// Set metrics for down connections
+	fakeID := "0"
+	fakeAlg := ""
+	fakeDH := ""
+	for conn := range loadedConns {
+		if _, ok := activeNames[conn]; !ok {
+			// Set IKE metrics for down state
+			ch <- prometheus.MustNewConstMetric(
+				c.ikeStatus,
+				prometheus.GaugeValue,
+				float64(down),
+				conn, fakeID,
+			)
+			ch <- prometheus.MustNewConstMetric(
+				c.ikeVersion,
+				prometheus.GaugeValue,
+				0,
+				conn, fakeID,
+			)
+			ch <- prometheus.MustNewConstMetric(
+				c.ikeInitiator,
+				prometheus.GaugeValue,
+				0,
+				conn, fakeID,
+			)
+			ch <- prometheus.MustNewConstMetric(
+				c.ikeNatLocal,
+				prometheus.GaugeValue,
+				0,
+				conn, fakeID,
+			)
+			ch <- prometheus.MustNewConstMetric(
+				c.ikeNatRemote,
+				prometheus.GaugeValue,
+				0,
+				conn, fakeID,
+			)
+			ch <- prometheus.MustNewConstMetric(
+				c.ikeNatFake,
+				prometheus.GaugeValue,
+				0,
+				conn, fakeID,
+			)
+			ch <- prometheus.MustNewConstMetric(
+				c.ikeNatAny,
+				prometheus.GaugeValue,
+				0,
+				conn, fakeID,
+			)
+			ch <- prometheus.MustNewConstMetric(
+				c.ikeEncKeySize,
+				prometheus.GaugeValue,
+				0,
+				conn, fakeID, fakeAlg, fakeDH,
+			)
+			ch <- prometheus.MustNewConstMetric(
+				c.ikeIntegKeySize,
+				prometheus.GaugeValue,
+				0,
+				conn, fakeID, fakeAlg, fakeDH,
+			)
+			ch <- prometheus.MustNewConstMetric(
+				c.ikeEstablishSecs,
+				prometheus.GaugeValue,
+				0,
+				conn, fakeID,
+			)
+			ch <- prometheus.MustNewConstMetric(
+				c.ikeRekeySecs,
+				prometheus.GaugeValue,
+				0,
+				conn, fakeID,
+			)
+			ch <- prometheus.MustNewConstMetric(
+				c.ikeReauthSecs,
+				prometheus.GaugeValue,
+				0,
+				conn, fakeID,
+			)
+			ch <- prometheus.MustNewConstMetric(
+				c.ikeChildren,
+				prometheus.GaugeValue,
+				0,
+				conn, fakeID,
+			)
 		}
 	}
 }
@@ -331,8 +449,9 @@ func (c *SasCollector) collectIkeMetrics(ikeSa IkeSa, ch chan<- prometheus.Metri
 }
 
 func (c *SasCollector) collectIkeChildMetrics(name string, uniqueID string, childIkeSa ChildIkeSa, ch chan<- prometheus.Metric) {
-	localTSs := strings.Join(childIkeSa.LocalTS, ";")
-	remoteTSs := strings.Join(childIkeSa.RemoteTS, ";")
+	localTSs := strings.Join(childIkeSa.LocalTS, ",")
+	remoteTSs := strings.Join(childIkeSa.RemoteTS, ",")
+
 	ch <- prometheus.MustNewConstMetric(
 		c.saStatus,
 		prometheus.GaugeValue,
@@ -413,57 +532,56 @@ func (c *SasCollector) collectIkeChildMetrics(name string, uniqueID string, chil
 	)
 }
 
-func (c *SasCollector) listSas() ([]IkeSa, error) {
-	s, err := c.viciClientFn()
-	if err != nil {
-		return nil, err
+// viciStateToInt maps VICI state strings to status codes
+func viciStateToInt(state string) connectionStatus {
+	switch strings.ToUpper(state) {
+	case "INSTALLED":
+		return tunnelInstalled
+	case "ESTABLISHED", "CONNECTING":
+		return connectionEstablished
+	case "PASSIVE", "FAILED", "DESTROYING":
+		return down
+	default:
+		return unknown
 	}
-	defer s.Close()
-
-	var res []IkeSa
-	msgs, err := s.StreamedCommandRequest("list-sas", "list-sa", nil)
-	if err != nil {
-		return res, err
-	}
-	for _, m := range msgs {
-		if e := m.Err(); e != nil {
-			log.Logger.Warnf("Message error: %v", e)
-			continue
-		}
-		for _, k := range m.Keys() {
-			rawMsg := m.Get(k).(*vici.Message)
-			var ikeSa IkeSa
-			if e := vici.UnmarshalMessage(rawMsg, &ikeSa); e != nil {
-				log.Logger.Warnf("Message unmarshal error: %v", e)
-				continue
-			}
-			ikeSa.Name = k
-			res = append(res, ikeSa)
-		}
-	}
-	return res, nil
 }
 
-func viciBoolToInt(v string) int {
-	if v == "yes" {
+// viciBoolToInt maps VICI bool strings to 0/1
+func viciBoolToInt(b string) int {
+	if strings.ToLower(b) == "yes" || b == "true" || b == "1" {
 		return 1
 	}
 	return 0
 }
 
-func viciStateToInt(v string) connectionStatus {
-	switch v {
-	case "ESTABLISHED":
-		return connectionEstablished
-	case "INSTALLED":
-		return tunnelInstalled
-	case "REKEYED":
-		return tunnelInstalled
-	case "REKEYING":
-		return tunnelInstalled
-	case "":
-		return down
-	default:
-		return unknown
+// listSas fetches active SAs via VICI
+func (c *SasCollector) listSas() ([]IkeSa, error) {
+	client, err := c.viciClientFn()
+	if err != nil {
+		return nil, err
 	}
+	defer client.Close()
+
+	msgs, err := client.StreamedCommandRequest("list-sas", "list-sa", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var sas []IkeSa
+	for _, msg := range msgs {
+		for _, ikeName := range msg.Keys() {
+			saMsg, ok := msg.Get(ikeName).(*vici.Message)
+			if !ok {
+				continue
+			}
+			var ike IkeSa
+			if err := vici.UnmarshalMessage(saMsg, &ike); err != nil {
+				log.Logger.Error("Failed to unmarshal IKE SA", zap.Error(err))
+				continue
+			}
+			ike.Name = ikeName
+			sas = append(sas, ike)
+		}
+	}
+	return sas, nil
 }
