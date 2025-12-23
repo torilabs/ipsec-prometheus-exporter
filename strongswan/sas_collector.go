@@ -18,6 +18,12 @@ const (
 	unknown               connectionStatus = 3
 )
 
+type ChildConfig struct {
+	Name      string
+	LocalTSs  []string
+	RemoteTSs []string
+}
+
 type SasCollector struct {
 	viciClientFn viciClientFn
 
@@ -249,9 +255,11 @@ func (c *SasCollector) Collect(ch chan<- prometheus.Metric) {
 		)
 		return
 	}
+	activeIkes := make(map[string]*IkeSa)
 	activeNames := make(map[string]struct{})
 	for _, ikeSa := range sas {
 		activeNames[ikeSa.Name] = struct{}{}
+		activeIkes[ikeSa.Name] = &ikeSa
 		c.collectIkeMetrics(ikeSa, ch)
 		for _, child := range ikeSa.Children {
 			c.collectIkeChildMetrics(ikeSa.Name, ikeSa.UniqueID, child, ch)
@@ -263,8 +271,8 @@ func (c *SasCollector) Collect(ch chan<- prometheus.Metric) {
 		float64(len(sas)),
 	)
 
-	// Get loaded connections
-	loadedConns := make(map[string]struct{})
+	// Get loaded connections and their children
+	loadedChildren := make(map[string][]ChildConfig)
 	connMsgs, err := client.StreamedCommandRequest("list-conns", "list-conn", nil)
 	if err != nil {
 		log.Logger.Error("Failed to list-conns", zap.Error(err))
@@ -272,15 +280,59 @@ func (c *SasCollector) Collect(ch chan<- prometheus.Metric) {
 	}
 	for _, msg := range connMsgs {
 		for _, connName := range msg.Keys() {
-			loadedConns[connName] = struct{}{}
+			connData, ok := msg.Get(connName).(*vici.Message)
+			if !ok {
+				continue
+			}
+			childrenMsg, ok := connData.Get("children").(*vici.Message)
+			if !ok {
+				continue
+			}
+			var children []ChildConfig
+			for _, childName := range childrenMsg.Keys() {
+				childData, ok := childrenMsg.Get(childName).(*vici.Message)
+				if !ok {
+					continue
+				}
+				var localTSs []string
+				localVal := childData.Get("local-ts")
+				switch localTS := localVal.(type) {
+				case []string:
+					localTSs = localTS
+				case []interface{}:
+					for _, ts := range localTS {
+						if s, ok := ts.(string); ok {
+							localTSs = append(localTSs, s)
+						}
+					}
+				}
+				var remoteTSs []string
+				remoteVal := childData.Get("remote-ts")
+				switch remoteTS := remoteVal.(type) {
+				case []string:
+					remoteTSs = remoteTS
+				case []interface{}:
+					for _, ts := range remoteTS {
+						if s, ok := ts.(string); ok {
+							remoteTSs = append(remoteTSs, s)
+						}
+					}
+				}
+				children = append(children, ChildConfig{
+					Name:      childName,
+					LocalTSs:  localTSs,
+					RemoteTSs: remoteTSs,
+				})
+			}
+			loadedChildren[connName] = children
 		}
 	}
 
-	// Set metrics for down connections
+	// Set metrics for down connections (IKE down)
 	fakeID := "0"
 	fakeAlg := ""
 	fakeDH := ""
-	for conn := range loadedConns {
+	for conn, children := range loadedChildren {
 		if _, ok := activeNames[conn]; !ok {
 			// Set IKE metrics for down state
 			ch <- prometheus.MustNewConstMetric(
@@ -358,9 +410,191 @@ func (c *SasCollector) Collect(ch chan<- prometheus.Metric) {
 			ch <- prometheus.MustNewConstMetric(
 				c.ikeChildren,
 				prometheus.GaugeValue,
-				0,
+				float64(len(children)),
 				conn, fakeID,
 			)
+
+			// Set child SA metrics for down state
+			for _, child := range children {
+				childID := "0"
+				localTSsStr := strings.Join(child.LocalTSs, ",")
+				remoteTSsStr := strings.Join(child.RemoteTSs, ",")
+
+				ch <- prometheus.MustNewConstMetric(
+					c.saStatus,
+					prometheus.GaugeValue,
+					float64(down),
+					conn, fakeID, child.Name, childID, localTSsStr, remoteTSsStr,
+				)
+				ch <- prometheus.MustNewConstMetric(
+					c.saEncap,
+					prometheus.GaugeValue,
+					0,
+					conn, fakeID, child.Name, childID,
+				)
+				ch <- prometheus.MustNewConstMetric(
+					c.saEncKeySize,
+					prometheus.GaugeValue,
+					0,
+					conn, fakeID, child.Name, childID, fakeAlg, fakeDH,
+				)
+				ch <- prometheus.MustNewConstMetric(
+					c.saIntegKeySize,
+					prometheus.GaugeValue,
+					0,
+					conn, fakeID, child.Name, childID, fakeAlg, fakeDH,
+				)
+				ch <- prometheus.MustNewConstMetric(
+					c.saBytesIn,
+					prometheus.GaugeValue,
+					0,
+					conn, fakeID, child.Name, childID, localTSsStr, remoteTSsStr,
+				)
+				ch <- prometheus.MustNewConstMetric(
+					c.saPacketsIn,
+					prometheus.GaugeValue,
+					0,
+					conn, fakeID, child.Name, childID, localTSsStr, remoteTSsStr,
+				)
+				ch <- prometheus.MustNewConstMetric(
+					c.saLastInSecs,
+					prometheus.GaugeValue,
+					0,
+					conn, fakeID, child.Name, childID, localTSsStr, remoteTSsStr,
+				)
+				ch <- prometheus.MustNewConstMetric(
+					c.saBytesOut,
+					prometheus.GaugeValue,
+					0,
+					conn, fakeID, child.Name, childID, localTSsStr, remoteTSsStr,
+				)
+				ch <- prometheus.MustNewConstMetric(
+					c.saPacketsOut,
+					prometheus.GaugeValue,
+					0,
+					conn, fakeID, child.Name, childID, localTSsStr, remoteTSsStr,
+				)
+				ch <- prometheus.MustNewConstMetric(
+					c.saLastOutSecs,
+					prometheus.GaugeValue,
+					0,
+					conn, fakeID, child.Name, childID, localTSsStr, remoteTSsStr,
+				)
+				ch <- prometheus.MustNewConstMetric(
+					c.saEstablishSecs,
+					prometheus.GaugeValue,
+					0,
+					conn, fakeID, child.Name, childID,
+				)
+				ch <- prometheus.MustNewConstMetric(
+					c.saRekeySecs,
+					prometheus.GaugeValue,
+					0,
+					conn, fakeID, child.Name, childID,
+				)
+				ch <- prometheus.MustNewConstMetric(
+					c.saLifetimeSecs,
+					prometheus.GaugeValue,
+					0,
+					conn, fakeID, child.Name, childID,
+				)
+			}
+		}
+	}
+
+	// Set metrics for down children in active IKEs
+	for conn := range activeNames {
+		loadedChilds := loadedChildren[conn]
+		activeChildNames := make(map[string]struct{})
+		for _, child := range activeIkes[conn].Children {
+			activeChildNames[child.Name] = struct{}{}
+		}
+		ikeID := activeIkes[conn].UniqueID
+		for _, child := range loadedChilds {
+			if _, isActive := activeChildNames[child.Name]; !isActive {
+				childID := "0"
+				localTSsStr := strings.Join(child.LocalTSs, ",")
+				remoteTSsStr := strings.Join(child.RemoteTSs, ",")
+
+				ch <- prometheus.MustNewConstMetric(
+					c.saStatus,
+					prometheus.GaugeValue,
+					float64(down),
+					conn, ikeID, child.Name, childID, localTSsStr, remoteTSsStr,
+				)
+				ch <- prometheus.MustNewConstMetric(
+					c.saEncap,
+					prometheus.GaugeValue,
+					0,
+					conn, ikeID, child.Name, childID,
+				)
+				ch <- prometheus.MustNewConstMetric(
+					c.saEncKeySize,
+					prometheus.GaugeValue,
+					0,
+					conn, ikeID, child.Name, childID, fakeAlg, fakeDH,
+				)
+				ch <- prometheus.MustNewConstMetric(
+					c.saIntegKeySize,
+					prometheus.GaugeValue,
+					0,
+					conn, ikeID, child.Name, childID, fakeAlg, fakeDH,
+				)
+				ch <- prometheus.MustNewConstMetric(
+					c.saBytesIn,
+					prometheus.GaugeValue,
+					0,
+					conn, ikeID, child.Name, childID, localTSsStr, remoteTSsStr,
+				)
+				ch <- prometheus.MustNewConstMetric(
+					c.saPacketsIn,
+					prometheus.GaugeValue,
+					0,
+					conn, ikeID, child.Name, childID, localTSsStr, remoteTSsStr,
+				)
+				ch <- prometheus.MustNewConstMetric(
+					c.saLastInSecs,
+					prometheus.GaugeValue,
+					0,
+					conn, ikeID, child.Name, childID, localTSsStr, remoteTSsStr,
+				)
+				ch <- prometheus.MustNewConstMetric(
+					c.saBytesOut,
+					prometheus.GaugeValue,
+					0,
+					conn, ikeID, child.Name, childID, localTSsStr, remoteTSsStr,
+				)
+				ch <- prometheus.MustNewConstMetric(
+					c.saPacketsOut,
+					prometheus.GaugeValue,
+					0,
+					conn, ikeID, child.Name, childID, localTSsStr, remoteTSsStr,
+				)
+				ch <- prometheus.MustNewConstMetric(
+					c.saLastOutSecs,
+					prometheus.GaugeValue,
+					0,
+					conn, ikeID, child.Name, childID, localTSsStr, remoteTSsStr,
+				)
+				ch <- prometheus.MustNewConstMetric(
+					c.saEstablishSecs,
+					prometheus.GaugeValue,
+					0,
+					conn, ikeID, child.Name, childID,
+				)
+				ch <- prometheus.MustNewConstMetric(
+					c.saRekeySecs,
+					prometheus.GaugeValue,
+					0,
+					conn, ikeID, child.Name, childID,
+				)
+				ch <- prometheus.MustNewConstMetric(
+					c.saLifetimeSecs,
+					prometheus.GaugeValue,
+					0,
+					conn, ikeID, child.Name, childID,
+				)
+			}
 		}
 	}
 }
