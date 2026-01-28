@@ -17,6 +17,12 @@ const (
 	unknown               connectionStatus = 3
 )
 
+type viciStats struct {
+	messagesReceived int
+	messageErrors    int
+	unmarshalErrors  int
+}
+
 type SasCollector struct {
 	viciClientFn viciClientFn
 
@@ -48,6 +54,12 @@ type SasCollector struct {
 	saEstablishSecs *prometheus.Desc
 	saRekeySecs     *prometheus.Desc
 	saLifetimeSecs  *prometheus.Desc
+
+	// Observability metrics for debugging
+	viciMessagesReceived *prometheus.Desc
+	viciMessageErrors    *prometheus.Desc
+	viciUnmarshalErrors  *prometheus.Desc
+	lastScrapeSuccess    *prometheus.Desc
 }
 
 func NewSasCollector(prefix string, viciClientFn viciClientFn) prometheus.Collector {
@@ -190,6 +202,27 @@ func NewSasCollector(prefix string, viciClientFn viciClientFn) prometheus.Collec
 			"Seconds until the lifetime expires",
 			[]string{"ike_name", "ike_id", "child_name", "child_id"}, nil,
 		),
+
+		viciMessagesReceived: prometheus.NewDesc(
+			prefix+"vici_messages_received",
+			"Number of VICI messages received during last scrape",
+			nil, nil,
+		),
+		viciMessageErrors: prometheus.NewDesc(
+			prefix+"vici_message_errors",
+			"Number of VICI message errors during last scrape",
+			nil, nil,
+		),
+		viciUnmarshalErrors: prometheus.NewDesc(
+			prefix+"vici_unmarshal_errors",
+			"Number of unmarshal errors during last scrape",
+			nil, nil,
+		),
+		lastScrapeSuccess: prometheus.NewDesc(
+			prefix+"last_scrape_success",
+			"Whether the last scrape was successful (1=success, 0=failure)",
+			nil, nil,
+		),
 	}
 }
 
@@ -222,18 +255,52 @@ func (c *SasCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.saEstablishSecs
 	ch <- c.saRekeySecs
 	ch <- c.saLifetimeSecs
+
+	ch <- c.viciMessagesReceived
+	ch <- c.viciMessageErrors
+	ch <- c.viciUnmarshalErrors
+	ch <- c.lastScrapeSuccess
 }
 
 func (c *SasCollector) Collect(ch chan<- prometheus.Metric) {
-	sas, err := c.listSas()
+	sas, err, stats := c.listSasWithStats()
+
+	// Emit observability metrics
+	ch <- prometheus.MustNewConstMetric(
+		c.viciMessagesReceived,
+		prometheus.GaugeValue,
+		float64(stats.messagesReceived),
+	)
+	ch <- prometheus.MustNewConstMetric(
+		c.viciMessageErrors,
+		prometheus.GaugeValue,
+		float64(stats.messageErrors),
+	)
+	ch <- prometheus.MustNewConstMetric(
+		c.viciUnmarshalErrors,
+		prometheus.GaugeValue,
+		float64(stats.unmarshalErrors),
+	)
+
 	if err != nil {
 		ch <- prometheus.MustNewConstMetric(
 			c.ikeCnt,
 			prometheus.GaugeValue,
 			float64(0),
 		)
+		ch <- prometheus.MustNewConstMetric(
+			c.lastScrapeSuccess,
+			prometheus.GaugeValue,
+			float64(0),
+		)
 		return
 	}
+
+	ch <- prometheus.MustNewConstMetric(
+		c.lastScrapeSuccess,
+		prometheus.GaugeValue,
+		float64(1),
+	)
 	ch <- prometheus.MustNewConstMetric(
 		c.ikeCnt,
 		prometheus.GaugeValue,
@@ -413,35 +480,59 @@ func (c *SasCollector) collectIkeChildMetrics(name string, uniqueID string, chil
 	)
 }
 
-func (c *SasCollector) listSas() ([]IkeSa, error) {
+func (c *SasCollector) listSasWithStats() ([]IkeSa, error, viciStats) {
+	stats := viciStats{}
+
 	s, err := c.viciClientFn()
 	if err != nil {
-		return nil, err
+		log.Logger.Errorf("Failed to create VICI client: %v", err)
+		return nil, err, stats
 	}
 	defer s.Close()
 
 	var res []IkeSa
 	msgs, err := s.StreamedCommandRequest("list-sas", "list-sa", nil)
 	if err != nil {
-		return res, err
+		log.Logger.Errorf("VICI StreamedCommandRequest failed: %v", err)
+		return res, err, stats
 	}
-	for _, m := range msgs {
+
+	stats.messagesReceived = len(msgs)
+	log.Logger.Debugf("Received %d message(s) from VICI list-sas command", len(msgs))
+
+	successfulParsing := 0
+
+	for msgIdx, m := range msgs {
 		if e := m.Err(); e != nil {
-			log.Logger.Warnf("Message error: %v", e)
+			stats.messageErrors++
+			log.Logger.Warnf("Message %d error: %v", msgIdx, e)
 			continue
 		}
-		for _, k := range m.Keys() {
+
+		keys := m.Keys()
+		log.Logger.Debugf("Message %d contains %d IKE SA(s): %v", msgIdx, len(keys), keys)
+
+		for _, k := range keys {
 			rawMsg := m.Get(k).(*vici.Message)
 			var ikeSa IkeSa
 			if e := vici.UnmarshalMessage(rawMsg, &ikeSa); e != nil {
-				log.Logger.Warnf("Message unmarshal error: %v", e)
+				stats.unmarshalErrors++
+				log.Logger.Warnf("Message unmarshal error for IKE '%s': %v", k, e)
+				log.Logger.Debugf("Failed to parse IKE SA '%s', raw message keys: %v", k, rawMsg.Keys())
 				continue
 			}
 			ikeSa.Name = k
 			res = append(res, ikeSa)
+			successfulParsing++
+			log.Logger.Debugf("Successfully parsed IKE SA '%s' (uniqueid: %s) with %d children",
+				k, ikeSa.UniqueID, len(ikeSa.Children))
 		}
 	}
-	return res, nil
+
+	log.Logger.Infof("VICI parsing complete: %d successful, %d message errors, %d unmarshal errors",
+		successfulParsing, stats.messageErrors, stats.unmarshalErrors)
+
+	return res, nil, stats
 }
 
 func viciBoolToInt(v string) int {
