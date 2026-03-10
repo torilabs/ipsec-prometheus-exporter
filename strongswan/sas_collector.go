@@ -420,11 +420,12 @@ func (c *SasCollector) listSas() ([]IkeSa, error) {
 	}
 	defer s.Close()
 
-	var res []IkeSa
 	msgs, err := s.StreamedCommandRequest("list-sas", "list-sa", nil)
 	if err != nil {
-		return res, err
+		return nil, err
 	}
+
+	res := make([]IkeSa, 0, len(msgs))
 	for _, m := range msgs {
 		if e := m.Err(); e != nil {
 			log.Logger.Warnf("Message error: %v", e)

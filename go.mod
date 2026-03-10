@@ -1,6 +1,6 @@
 module github.com/torilabs/ipsec-prometheus-exporter
 
-go 1.24
+go 1.25
 
 require (
 	github.com/etherlabsio/healthcheck/v2 v2.0.0

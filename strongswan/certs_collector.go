@@ -93,12 +93,11 @@ func (c *CertsCollector) collectCertMetrics(certs []Cert, ch chan<- prometheus.M
 		}
 		expireIn := cert.NotAfter.Sub(now).Seconds()
 
-		labels := []string{
-			formatSerialNumber(cert.SerialNumber),
-			cert.Subject.String(),
-			cert.NotBefore.Format(time.RFC3339),
-			cert.NotAfter.Format(time.RFC3339),
-		}
+		labels := make([]string, 4)
+		labels[0] = formatSerialNumber(cert.SerialNumber)
+		labels[1] = cert.Subject.String()
+		labels[2] = cert.NotBefore.Format(time.RFC3339)
+		labels[3] = cert.NotAfter.Format(time.RFC3339)
 		ch <- prometheus.MustNewConstMetric(
 			c.certValid,
 			prometheus.GaugeValue,
@@ -131,7 +130,7 @@ func (c *CertsCollector) listCerts() ([]Cert, error) {
 		return nil, err
 	}
 
-	var certs []Cert
+	certs := make([]Cert, 0, len(msgs))
 	for _, m := range msgs {
 		if err = m.Err(); err != nil {
 			log.Logger.Warnf("Message error: %v", err)
@@ -159,12 +158,17 @@ func formatHexStrWithColons(hexStr string) string {
 		hexStr = "0" + hexStr
 	}
 
+	capacity := len(hexStr)
+	if len(hexStr) > 2 {
+		capacity += len(hexStr)/2 - 1
+	}
+
 	var formatted strings.Builder
+	formatted.Grow(capacity)
 	for i, r := range hexStr {
 		if i > 0 && i%2 == 0 {
 			formatted.WriteRune(':')
 		}
-
 		formatted.WriteRune(r)
 	}
 
