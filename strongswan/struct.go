@@ -69,3 +69,7 @@ type Cert struct {
 	Flags string `vici:"flags"`
 	Data  string `vici:"data"`
 }
+
+type Conn struct {
+    Name string
+}
