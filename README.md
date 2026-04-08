@@ -1,6 +1,6 @@
 # IPSec Prometheus Exporter
 
-_The IPSec Prometheus exporter subscribes to the strongSwan via Vici API and exposes [Security Associations](https://github.com/strongswan/strongswan/blob/master/src/libcharon/plugins/vici/README.md#list-sa) (SAs) metrics. Optionally [X509 certificate](https://github.com/strongswan/strongswan/blob/master/src/libcharon/plugins/vici/README.md#list-certs) metrics can be turned on._
+_The IPSec Prometheus exporter subscribes to the strongSwan via Vici API and exposes [Security Associations](https://github.com/strongswan/strongswan/blob/master/src/libcharon/plugins/vici/README.md#list-sa) (SAs) and [configured connections](https://github.com/strongswan/strongswan/blob/master/src/libcharon/plugins/vici/README.md#list-conns) metrics. Optionally [X509 certificate](https://github.com/strongswan/strongswan/blob/master/src/libcharon/plugins/vici/README.md#list-certs) metrics can be turned on._
 
 Collected metrics (together with application metrics) are exposed on `/metrics` endpoint. Prometheus target is then configured with this endpoint and port e.g. `http://localhost:8079/metrics`.
 
@@ -23,7 +23,24 @@ Options and default values:
 --enable-cert-metrics=false     Enable collecting of X509 certificate metrics (true, false)
 ```
 
-## Value Definition
+## Metrics
+
+### Configured Connections
+
+These metrics are always present for every configured connection in strongSwan, regardless of whether the tunnel is currently active. This enables detection of down tunnels by comparing configured vs active SAs.
+
+| Metric | Labels | Description |
+|--------|--------|-------------|
+| `strongswan_conn_configured` | `conn_name` | Always 1 for each configured IKE connection |
+| `strongswan_conn_child_configured` | `conn_name`, `child_name`, `local_ts`, `remote_ts` | Always 1 for each configured child SA |
+
+**Detecting down tunnels:** A tunnel is down when `strongswan_conn_child_configured` exists for a `child_name` but there is no corresponding `strongswan_sa_status` metric. Example PromQL:
+
+```promql
+strongswan_conn_child_configured unless on (child_name) strongswan_sa_status
+```
+
+### SA Status Values
 
 | Metric              | Value | Description                                        |
 |---------------------|-------|----------------------------------------------------|

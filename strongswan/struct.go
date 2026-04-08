@@ -62,6 +62,18 @@ type ChildIkeSa struct {
 }
 
 /*
+ConnConfig documentation: https://github.com/strongswan/strongswan/blob/master/src/libcharon/plugins/vici/README.md#list-conns
+*/
+type ConnConfig struct {
+	Children map[string]ConnChildConfig `vici:"children"`
+}
+
+type ConnChildConfig struct {
+	LocalTS  []string `vici:"local-ts"`
+	RemoteTS []string `vici:"remote-ts"`
+}
+
+/*
 Cert documentation: https://github.com/strongswan/strongswan/blob/master/src/libcharon/plugins/vici/README.md#list-cert
 */
 type Cert struct {
