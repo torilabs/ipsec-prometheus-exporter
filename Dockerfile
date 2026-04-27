@@ -1,5 +1,5 @@
 # Builder image
-FROM golang:1.25-alpine3.23@sha256:7a00384194cf2cb68924bbb918d675f1517357433c8541bac0ab2f929b9d5447 AS builder
+FROM golang:1.25-alpine3.23@sha256:5caaf1cca9dc351e13deafbc3879fd4754801acba8653fa9540cea125d01a71f AS builder
 WORKDIR /workspace
 
 ENV GO111MODULE=on
