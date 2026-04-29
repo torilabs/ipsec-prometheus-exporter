@@ -35,6 +35,7 @@ var (
 	viciNetwork        = flag.String("vici-network", "tcp", "Vici network (tcp, udp or unix)")
 	viciAddr           = flag.String("vici-address", "localhost:4502", "Vici host and port or unix socket path")
 	certMetricsEnabled = flag.Bool("enable-cert-metrics", false, "Enable X509 certificate metrics")
+	connMetricsEnabled = flag.Bool("enable-conn-metrics", false, "Enable connection configuration metrics")
 )
 
 func main() {
@@ -61,7 +62,7 @@ func run() (err error) {
 		}
 		return s, err
 	}
-	cl := strongswan.NewCollector(viciClientFn, *certMetricsEnabled)
+	cl := strongswan.NewCollector(viciClientFn, *certMetricsEnabled, *connMetricsEnabled)
 
 	checkers := make([]healthcheck.Option, 0)
 	checkers = append(checkers, healthcheck.WithChecker("vici", cl))

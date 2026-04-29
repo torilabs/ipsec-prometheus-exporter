@@ -20,7 +20,7 @@ type Collector struct {
 	cs           []prometheus.Collector
 }
 
-func NewCollector(viciClientFn viciClientFn, certMetricsEnabled bool) *Collector {
+func NewCollector(viciClientFn viciClientFn, certMetricsEnabled bool, connMetricsEnabled bool) *Collector {
 	prefix := "strongswan_"
 	cs := []prometheus.Collector{
 		NewSasCollector(prefix, viciClientFn),
@@ -28,6 +28,10 @@ func NewCollector(viciClientFn viciClientFn, certMetricsEnabled bool) *Collector
 	if certMetricsEnabled {
 		log.Logger.Info("Certificate metrics enabled.")
 		cs = append(cs, NewCertsCollector(prefix, viciClientFn, time.Now))
+	}
+	if connMetricsEnabled {
+		log.Logger.Info("Connection metrics enabled.")
+		cs = append(cs, NewConnsCollector(prefix, viciClientFn))
 	}
 
 	return &Collector{
