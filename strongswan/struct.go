@@ -69,3 +69,28 @@ type Cert struct {
 	Flags string `vici:"flags"`
 	Data  string `vici:"data"`
 }
+
+/*
+Conn documentation: https://github.com/strongswan/strongswan/blob/master/src/libcharon/plugins/vici/README.md#list-conn
+*/
+type Conn struct {
+	Name        string
+	LocalAddrs  []string             `vici:"local_addrs"`
+	RemoteAddrs []string             `vici:"remote_addrs"`
+	LocalPort   int                  `vici:"local_port"`
+	RemotePort  int                  `vici:"remote_port"`
+	Version     string               `vici:"version"`
+	ReauthTime  int64                `vici:"reauth_time"`
+	RekeyTime   int64                `vici:"rekey_time"`
+	Children    map[string]ConnChild `vici:"children"`
+}
+
+type ConnChild struct {
+	Name         string   `vici:"name"`
+	Mode         string   `vici:"mode"`
+	RekeyTime    int64    `vici:"rekey_time"`
+	RekeyBytes   int64    `vici:"rekey_bytes"`
+	RekeyPackets int64    `vici:"rekey_packets"`
+	LocalTS      []string `vici:"local-ts"`
+	RemoteTS     []string `vici:"remote-ts"`
+}

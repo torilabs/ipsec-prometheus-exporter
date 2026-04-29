@@ -28,6 +28,7 @@ type e2eTestSuite struct {
 	viciNet           string
 	ikeName           string
 	enableCertMetrics bool
+	enableConnMetrics bool
 	stopServer        func()
 }
 
@@ -38,6 +39,7 @@ func TestE2ETestSuite(t *testing.T) {
 		viciNet:           "tcp",
 		ikeName:           "home",
 		enableCertMetrics: true,
+		enableConnMetrics: true,
 	})
 }
 
@@ -56,8 +58,8 @@ func (s *e2eTestSuite) SetupSuite() {
 		return sess, err
 	}
 
-	// Create collector with cert metrics enabled
-	cl := strongswan.NewCollector(viciClientFn, s.enableCertMetrics)
+	// Create collector with cert and conn metrics enabled
+	cl := strongswan.NewCollector(viciClientFn, s.enableCertMetrics, s.enableConnMetrics)
 
 	// Setup healthcheck
 	checkers := make([]healthcheck.Option, 0)
@@ -273,6 +275,36 @@ func (s *e2eTestSuite) Test_EndToEnd_CertMetrics() {
 
 	// Check CA certificate validity
 	s.Contains(metricsBody, `strongswan_cert_valid{not_after="2034-03-20T15:01:04Z",not_before="2024-03-20T15:01:04Z",serial_number="63:68:4d:00:11:20:7d:dc",subject="CN=Cyber Root CA,O=Cyber,C=CH"} 1`)
+}
+
+func (s *e2eTestSuite) Test_EndToEnd_ConnMetrics() {
+	metricsBody := s.httpResponseBody("metrics")
+
+	// Check for connection count metric
+	s.Contains(metricsBody, `# HELP strongswan_conn_count Number of loaded connections`)
+	s.Contains(metricsBody, `# TYPE strongswan_conn_count gauge`)
+	s.Contains(metricsBody, `strongswan_conn_count 4`)
+
+	// Check for connection version metric
+	s.Contains(metricsBody, `# HELP strongswan_conn_version IKE version for connection`)
+	s.Contains(metricsBody, `# TYPE strongswan_conn_version gauge`)
+	s.Contains(metricsBody, `strongswan_conn_version{conn_name="home",version="IKEv2"} 1`)
+
+	// Check for connection rekey time metric
+	s.Contains(metricsBody, `# HELP strongswan_conn_rekey_time IKE_SA rekeying interval in seconds`)
+	s.Contains(metricsBody, `# TYPE strongswan_conn_rekey_time gauge`)
+	s.Contains(metricsBody, `strongswan_conn_rekey_time{conn_name="home"} 14400`)
+
+	// Check for child count metric
+	s.Contains(metricsBody, `# HELP strongswan_conn_child_count Number of CHILD_SA configurations`)
+	s.Contains(metricsBody, `# TYPE strongswan_conn_child_count gauge`)
+	s.Contains(metricsBody, `strongswan_conn_child_count{conn_name="eap"} 1`)
+	s.Contains(metricsBody, `strongswan_conn_child_count{conn_name="home"} 2`)
+
+	// Check for child rekey time metric
+	s.Contains(metricsBody, `# HELP strongswan_conn_child_rekey_time CHILD_SA rekeying interval in seconds`)
+	s.Contains(metricsBody, `# TYPE strongswan_conn_child_rekey_time gauge`)
+	s.Contains(metricsBody, `strongswan_conn_child_rekey_time{child_name="net",conn_name="home",mode="TUNNEL"} 3600`)
 }
 
 func (s *e2eTestSuite) httpResponseBody(path string) string {

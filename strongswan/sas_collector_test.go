@@ -15,6 +15,7 @@ type fakeViciClient struct {
 	err            error
 	saMsgs         []*vici.Message
 	certMsgs       []*vici.Message
+	connMsgs       []*vici.Message
 	closeTriggered int
 }
 
@@ -24,6 +25,9 @@ func (fvc *fakeViciClient) StreamedCommandRequest(cmd string, event string, _ *v
 	}
 	if cmd == "list-certs" && event == "list-cert" {
 		return fvc.certMsgs, fvc.err
+	}
+	if cmd == "list-conns" && event == "list-conn" {
+		return fvc.connMsgs, fvc.err
 	}
 	return nil, errors.New("invalid command")
 }
