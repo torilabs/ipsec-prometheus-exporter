@@ -32,6 +32,16 @@ Options and default values:
 | strongswan_*_status | 2     | The tunnel or connection is down.                  |
 | strongswan_*_status | 3     | The tunnel or connection status is not recognized. |
 
+`strongswan_sa_*` metrics are emitted only for active CHILD_SAs returned by `list-sas`.
+
+Additional CHILD_SA inventory metrics are exposed from `list-conns`:
+
+| Metric                      | Value | Description                                                        |
+|----------------------------|-------|--------------------------------------------------------------------|
+| strongswan_child_configured | 1     | The CHILD_SA is currently loaded in strongSwan configuration.      |
+| strongswan_child_up         | 0     | The configured CHILD_SA currently has no active SA.                |
+| strongswan_child_up         | 1     | The configured CHILD_SA currently has an active SA.                |
+
 ## Build & Run
 To build the binary run:
 ```bash

@@ -48,6 +48,9 @@ type SasCollector struct {
 	saEstablishSecs *prometheus.Desc
 	saRekeySecs     *prometheus.Desc
 	saLifetimeSecs  *prometheus.Desc
+
+	childConfigured *prometheus.Desc
+	childUp         *prometheus.Desc
 }
 
 func NewSasCollector(prefix string, viciClientFn viciClientFn) prometheus.Collector {
@@ -190,6 +193,16 @@ func NewSasCollector(prefix string, viciClientFn viciClientFn) prometheus.Collec
 			"Seconds until the lifetime expires",
 			[]string{"ike_name", "ike_id", "child_name", "child_id"}, nil,
 		),
+		childConfigured: prometheus.NewDesc(
+			prefix+"child_configured",
+			"Configured CHILD_SA definitions currently loaded in strongSwan",
+			[]string{"ike_name", "child_name", "local_ts", "remote_ts"}, nil,
+		),
+		childUp: prometheus.NewDesc(
+			prefix+"child_up",
+			"Flag if a configured CHILD_SA currently has an active SA",
+			[]string{"ike_name", "child_name", "local_ts", "remote_ts"}, nil,
+		),
 	}
 }
 
@@ -222,6 +235,8 @@ func (c *SasCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.saEstablishSecs
 	ch <- c.saRekeySecs
 	ch <- c.saLifetimeSecs
+	ch <- c.childConfigured
+	ch <- c.childUp
 }
 
 func (c *SasCollector) Collect(ch chan<- prometheus.Metric) {
@@ -245,6 +260,13 @@ func (c *SasCollector) Collect(ch chan<- prometheus.Metric) {
 			c.collectIkeChildMetrics(ikeSa.Name, ikeSa.UniqueID, child, ch)
 		}
 	}
+
+	conns, err := c.listConns()
+	if err != nil {
+		log.Logger.Warnf("list-conns failed: %v", err)
+		return
+	}
+	c.collectConfiguredChildMetrics(conns, sas, ch)
 }
 
 func (c *SasCollector) collectIkeMetrics(ikeSa IkeSa, ch chan<- prometheus.Metric) {
@@ -413,6 +435,39 @@ func (c *SasCollector) collectIkeChildMetrics(name string, uniqueID string, chil
 	)
 }
 
+func (c *SasCollector) collectConfiguredChildMetrics(conns []Conn, sas []IkeSa, ch chan<- prometheus.Metric) {
+	activeChildren := make(map[string]struct{})
+	for _, ikeSa := range sas {
+		for _, child := range ikeSa.Children {
+			activeChildren[childConfigKey(ikeSa.Name, child.Name)] = struct{}{}
+		}
+	}
+
+	for _, conn := range conns {
+		for _, child := range conn.Children {
+			localTSs := strings.Join(child.LocalTS, ";")
+			remoteTSs := strings.Join(child.RemoteTS, ";")
+			ch <- prometheus.MustNewConstMetric(
+				c.childConfigured,
+				prometheus.GaugeValue,
+				float64(1),
+				conn.Name, child.Name, localTSs, remoteTSs,
+			)
+
+			up := 0.0
+			if _, ok := activeChildren[childConfigKey(conn.Name, child.Name)]; ok {
+				up = 1
+			}
+			ch <- prometheus.MustNewConstMetric(
+				c.childUp,
+				prometheus.GaugeValue,
+				up,
+				conn.Name, child.Name, localTSs, remoteTSs,
+			)
+		}
+	}
+}
+
 func (c *SasCollector) listSas() ([]IkeSa, error) {
 	s, err := c.viciClientFn()
 	if err != nil {
@@ -443,6 +498,46 @@ func (c *SasCollector) listSas() ([]IkeSa, error) {
 		}
 	}
 	return res, nil
+}
+
+func (c *SasCollector) listConns() ([]Conn, error) {
+	s, err := c.viciClientFn()
+	if err != nil {
+		return nil, err
+	}
+	defer s.Close()
+
+	msgs, err := s.StreamedCommandRequest("list-conns", "list-conn", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	res := make([]Conn, 0, len(msgs))
+	for _, m := range msgs {
+		if e := m.Err(); e != nil {
+			log.Logger.Warnf("Message error: %v", e)
+			continue
+		}
+		for _, k := range m.Keys() {
+			rawMsg := m.Get(k).(*vici.Message)
+			var conn Conn
+			if e := vici.UnmarshalMessage(rawMsg, &conn); e != nil {
+				log.Logger.Warnf("Message unmarshal error: %v", e)
+				continue
+			}
+			conn.Name = k
+			for childName, child := range conn.Children {
+				child.Name = childName
+				conn.Children[childName] = child
+			}
+			res = append(res, conn)
+		}
+	}
+	return res, nil
+}
+
+func childConfigKey(ikeName string, childName string) string {
+	return ikeName + "\x00" + childName
 }
 
 func viciBoolToInt(v string) int {

@@ -14,6 +14,7 @@ import (
 type fakeViciClient struct {
 	err            error
 	saMsgs         []*vici.Message
+	connMsgs       []*vici.Message
 	certMsgs       []*vici.Message
 	closeTriggered int
 }
@@ -21,6 +22,9 @@ type fakeViciClient struct {
 func (fvc *fakeViciClient) StreamedCommandRequest(cmd string, event string, _ *vici.Message) ([]*vici.Message, error) {
 	if cmd == "list-sas" && event == "list-sa" {
 		return fvc.saMsgs, fvc.err
+	}
+	if cmd == "list-conns" && event == "list-conn" {
+		return fvc.connMsgs, fvc.err
 	}
 	if cmd == "list-certs" && event == "list-cert" {
 		return fvc.certMsgs, fvc.err
@@ -530,4 +534,98 @@ func TestSasCollector_MetricsChild(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSasCollector_ConfiguredChildren(t *testing.T) {
+	tests := []struct {
+		name              string
+		saMsgs            []*vici.Message
+		metricName        string
+		wantMetricsHelp   string
+		wantMetricsType   string
+		wantMetricsLabels string
+		wantMetricsValue  int
+		wantMetricsCount  int
+	}{
+		{
+			name:              "configured child",
+			metricName:        "swtest_child_configured",
+			wantMetricsHelp:   "Configured CHILD_SA definitions currently loaded in strongSwan",
+			wantMetricsType:   "gauge",
+			wantMetricsLabels: `child_name="child-1",ike_name="ike-name",local_ts="local-ts-1;local-ts-2",remote_ts="remote-ts-1;remote-ts-2"`,
+			wantMetricsValue:  1,
+			wantMetricsCount:  3,
+		},
+		{
+			name:              "child up",
+			saMsgs:            []*vici.Message{configuredChildSaMessage()},
+			metricName:        "swtest_child_up",
+			wantMetricsHelp:   "Flag if a configured CHILD_SA currently has an active SA",
+			wantMetricsType:   "gauge",
+			wantMetricsLabels: `child_name="child-1",ike_name="ike-name",local_ts="local-ts-1;local-ts-2",remote_ts="remote-ts-1;remote-ts-2"`,
+			wantMetricsValue:  1,
+			wantMetricsCount:  29,
+		},
+		{
+			name:              "child down",
+			metricName:        "swtest_child_up",
+			wantMetricsHelp:   "Flag if a configured CHILD_SA currently has an active SA",
+			wantMetricsType:   "gauge",
+			wantMetricsLabels: `child_name="child-1",ike_name="ike-name",local_ts="local-ts-1;local-ts-2",remote_ts="remote-ts-1;remote-ts-2"`,
+			wantMetricsValue:  0,
+			wantMetricsCount:  3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := NewSasCollector("swtest_", func() (ViciClient, error) {
+				return &fakeViciClient{
+					saMsgs:   tt.saMsgs,
+					connMsgs: []*vici.Message{configuredChildConnMessage()},
+				}, nil
+			})
+
+			cnt := testutil.CollectAndCount(c)
+			require.Equal(t, tt.wantMetricsCount, cnt, "metrics count")
+
+			wantMetricsContent := fmt.Sprintf(`# HELP %s %s
+# TYPE %s %s
+%s{%s} %d
+`, tt.metricName, tt.wantMetricsHelp, tt.metricName, tt.wantMetricsType, tt.metricName, tt.wantMetricsLabels, tt.wantMetricsValue)
+			if err := testutil.CollectAndCompare(c, strings.NewReader(wantMetricsContent), tt.metricName); err != nil {
+				t.Errorf("unexpected collecting result of configured child '%s':\n%s", tt.metricName, err)
+			}
+		})
+	}
+}
+
+func configuredChildConnMessage() *vici.Message {
+	childMsg := vici.NewMessage()
+	childMsg.Set("local-ts", []string{"local-ts-1", "local-ts-2"})
+	childMsg.Set("remote-ts", []string{"remote-ts-1", "remote-ts-2"})
+
+	children := vici.NewMessage()
+	children.Set("child-1", childMsg)
+
+	ikeMsg := vici.NewMessage()
+	ikeMsg.Set("children", children)
+
+	msgs := vici.NewMessage()
+	msgs.Set("ike-name", ikeMsg)
+	return msgs
+}
+
+func configuredChildSaMessage() *vici.Message {
+	saMsg := vici.NewMessage()
+	saMsg.Set("name", "child-1")
+	saMsg.Set("uniqueid", "sa-unique-id")
+
+	ikeMsg := vici.NewMessage()
+	ikeMsg.Set("child-sas", map[string]any{"child-sa-name": saMsg})
+	ikeMsg.Set("uniqueid", "some-unique-id")
+
+	msgs := vici.NewMessage()
+	msgs.Set("ike-name", ikeMsg)
+	return msgs
 }
