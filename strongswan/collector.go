@@ -24,6 +24,7 @@ func NewCollector(viciClientFn viciClientFn, certMetricsEnabled bool) *Collector
 	prefix := "strongswan_"
 	cs := []prometheus.Collector{
 		NewSasCollector(prefix, viciClientFn),
+		NewConnsCollector(prefix, viciClientFn),
 	}
 	if certMetricsEnabled {
 		log.Logger.Info("Certificate metrics enabled.")
