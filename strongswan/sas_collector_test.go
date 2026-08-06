@@ -37,6 +37,25 @@ func (fvc *fakeViciClient) Close() error {
 	return nil
 }
 
+func TestViciStateToInt(t *testing.T) {
+	tests := []struct {
+		state string
+		want  connectionStatus
+	}{
+		{"ESTABLISHED", connectionEstablished},
+		{"INSTALLED", tunnelInstalled},
+		{"REKEYED", tunnelInstalled},
+		{"REKEYING", tunnelInstalled},
+		{"", down},
+		{"SOME_UNKNOWN_STATE", unknown},
+	}
+	for _, tt := range tests {
+		t.Run(tt.state, func(t *testing.T) {
+			require.Equal(t, tt.want, viciStateToInt(tt.state))
+		})
+	}
+}
+
 func TestSasCollector_Metrics(t *testing.T) {
 	tests := []struct {
 		name              string
@@ -72,6 +91,19 @@ func TestSasCollector_Metrics(t *testing.T) {
 			msgsModifierFn: func(msgs *vici.Message) {
 				msgs.Set("success", "no")
 				msgs.Set("errmsg", "some error")
+			},
+			metricName:       "swtest_ike_count",
+			wantMetricsHelp:  "Number of known IKEs",
+			wantMetricsType:  "gauge",
+			wantMetricsValue: 0,
+			wantMetricsCount: 1,
+		},
+		{
+			name: "unmarshal error skips invalid ike sa",
+			msgsModifierFn: func(msgs *vici.Message) {
+				ikeMsg := vici.NewMessage()
+				ikeMsg.Set("version", "not-a-number")
+				msgs.Set("ike-name", ikeMsg)
 			},
 			metricName:       "swtest_ike_count",
 			wantMetricsHelp:  "Number of known IKEs",
