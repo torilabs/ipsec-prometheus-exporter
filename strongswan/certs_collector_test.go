@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"github.com/strongswan/govici/vici"
@@ -67,6 +68,51 @@ func TestCertsCollector_Metrics(t *testing.T) {
 			wantMetricsHelp:  "Number of X509 certificates",
 			wantMetricsType:  "gauge",
 			wantMetricsValue: 0,
+			wantMetricsCount: 1,
+		},
+		{
+			name:       "non-X509 type skipped in listCerts",
+			nowSeconds: time.Now().Unix(),
+			msgsGetterFn: func() []*vici.Message {
+				msg := vici.NewMessage()
+				msg.Set("type", "CRL")
+				msg.Set("data", "somebytes")
+				return []*vici.Message{msg}
+			},
+			metricName:       "swtest_cert_count",
+			wantMetricsHelp:  "Number of X509 certificates",
+			wantMetricsType:  "gauge",
+			wantMetricsValue: 0,
+			wantMetricsCount: 1,
+		},
+		{
+			name:       "unmarshal error in listCerts skips cert",
+			nowSeconds: time.Now().Unix(),
+			msgsGetterFn: func() []*vici.Message {
+				msg := vici.NewMessage()
+				msg.Set("type", "X509")
+				msg.Set("data", vici.NewMessage())
+				return []*vici.Message{msg}
+			},
+			metricName:       "swtest_cert_count",
+			wantMetricsHelp:  "Number of X509 certificates",
+			wantMetricsType:  "gauge",
+			wantMetricsValue: 0,
+			wantMetricsCount: 1,
+		},
+		{
+			name:       "invalid DER data skipped in collectCertMetrics",
+			nowSeconds: time.Now().Unix(),
+			msgsGetterFn: func() []*vici.Message {
+				msg := vici.NewMessage()
+				msg.Set("type", "X509")
+				msg.Set("data", "not-valid-der-bytes")
+				return []*vici.Message{msg}
+			},
+			metricName:       "swtest_cert_count",
+			wantMetricsHelp:  "Number of X509 certificates",
+			wantMetricsType:  "gauge",
+			wantMetricsValue: 1,
 			wantMetricsCount: 1,
 		},
 		{
@@ -197,6 +243,17 @@ func TestCertsCollector_Metrics(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCertsCollector_CollectCertMetrics_UnknownType(t *testing.T) {
+	c := NewCertsCollector("swtest_", nil, func() time.Time {
+		return time.Unix(time.Now().Unix(), 0)
+	}).(*CertsCollector)
+
+	ch := make(chan prometheus.Metric, 10)
+	c.collectCertMetrics([]Cert{{Type: "CRL", Data: "somedata"}}, ch)
+	close(ch)
+	require.Empty(t, ch, "unexpected metrics for unknown cert type")
 }
 
 func TestFormatSerialNumber(t *testing.T) {
