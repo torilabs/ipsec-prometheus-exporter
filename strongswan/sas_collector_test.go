@@ -120,7 +120,7 @@ func TestSasCollector_Metrics(t *testing.T) {
 			wantMetricsHelp:  "Number of known IKEs",
 			wantMetricsType:  "gauge",
 			wantMetricsValue: 1,
-			wantMetricsCount: 14,
+			wantMetricsCount: 15,
 		},
 		{
 			name: "two ike count",
@@ -132,7 +132,24 @@ func TestSasCollector_Metrics(t *testing.T) {
 			wantMetricsHelp:  "Number of known IKEs",
 			wantMetricsType:  "gauge",
 			wantMetricsValue: 2,
-			wantMetricsCount: 27,
+			wantMetricsCount: 29,
+		},
+		{
+			name: "ike info",
+			msgsModifierFn: func(msgs *vici.Message) {
+				ikeMsg := vici.NewMessage()
+				ikeMsg.Set("uniqueid", "some-unique-id")
+				ikeMsg.Set("local-id", "gw.example.com")
+				ikeMsg.Set("remote-id", "ap-0001@example.com")
+				ikeMsg.Set("remote-host", "192.0.2.10")
+				msgs.Set("ike-name", ikeMsg)
+			},
+			metricName:        "swtest_ike_info",
+			wantMetricsHelp:   "Identities and remote host of this IKE",
+			wantMetricsType:   "gauge",
+			wantMetricsLabels: `ike_id="some-unique-id",ike_name="ike-name",local_id="gw.example.com",remote_host="192.0.2.10",remote_id="ap-0001@example.com"`,
+			wantMetricsValue:  1,
+			wantMetricsCount:  15,
 		},
 		{
 			name: "ike version & name & uniqueid",
@@ -147,7 +164,7 @@ func TestSasCollector_Metrics(t *testing.T) {
 			wantMetricsType:   "gauge",
 			wantMetricsLabels: `ike_id="some-unique-id",ike_name="ike-name"`,
 			wantMetricsValue:  5,
-			wantMetricsCount:  14,
+			wantMetricsCount:  15,
 		},
 		{
 			name: "ike status",
@@ -162,7 +179,7 @@ func TestSasCollector_Metrics(t *testing.T) {
 			wantMetricsType:   "gauge",
 			wantMetricsLabels: `ike_id="some-unique-id",ike_name="ike-name"`,
 			wantMetricsValue:  1,
-			wantMetricsCount:  14,
+			wantMetricsCount:  15,
 		},
 		{
 			name: "ike initiator",
@@ -177,7 +194,7 @@ func TestSasCollector_Metrics(t *testing.T) {
 			wantMetricsType:   "gauge",
 			wantMetricsLabels: `ike_id="some-unique-id",ike_name="ike-name"`,
 			wantMetricsValue:  1,
-			wantMetricsCount:  14,
+			wantMetricsCount:  15,
 		},
 		{
 			name: "ike NAT local",
@@ -192,7 +209,7 @@ func TestSasCollector_Metrics(t *testing.T) {
 			wantMetricsType:   "gauge",
 			wantMetricsLabels: `ike_id="some-unique-id",ike_name="ike-name"`,
 			wantMetricsValue:  1,
-			wantMetricsCount:  14,
+			wantMetricsCount:  15,
 		},
 		{
 			name: "ike NAT remote",
@@ -207,7 +224,7 @@ func TestSasCollector_Metrics(t *testing.T) {
 			wantMetricsType:   "gauge",
 			wantMetricsLabels: `ike_id="some-unique-id",ike_name="ike-name"`,
 			wantMetricsValue:  1,
-			wantMetricsCount:  14,
+			wantMetricsCount:  15,
 		},
 		{
 			name: "ike NAT fake",
@@ -222,7 +239,7 @@ func TestSasCollector_Metrics(t *testing.T) {
 			wantMetricsType:   "gauge",
 			wantMetricsLabels: `ike_id="some-unique-id",ike_name="ike-name"`,
 			wantMetricsValue:  1,
-			wantMetricsCount:  14,
+			wantMetricsCount:  15,
 		},
 		{
 			name: "ike NAT any",
@@ -237,7 +254,7 @@ func TestSasCollector_Metrics(t *testing.T) {
 			wantMetricsType:   "gauge",
 			wantMetricsLabels: `ike_id="some-unique-id",ike_name="ike-name"`,
 			wantMetricsValue:  1,
-			wantMetricsCount:  14,
+			wantMetricsCount:  15,
 		},
 		{
 			name: "ike encryption key",
@@ -254,7 +271,7 @@ func TestSasCollector_Metrics(t *testing.T) {
 			wantMetricsType:   "gauge",
 			wantMetricsLabels: `algorithm="SHA-256",dh_group="DH",ike_id="some-unique-id",ike_name="ike-name"`,
 			wantMetricsValue:  1024,
-			wantMetricsCount:  14,
+			wantMetricsCount:  15,
 		},
 		{
 			name: "ike integrity key",
@@ -271,7 +288,7 @@ func TestSasCollector_Metrics(t *testing.T) {
 			wantMetricsType:   "gauge",
 			wantMetricsLabels: `algorithm="SHA-256",dh_group="DH",ike_id="some-unique-id",ike_name="ike-name"`,
 			wantMetricsValue:  1024,
-			wantMetricsCount:  14,
+			wantMetricsCount:  15,
 		},
 		{
 			name: "ike established",
@@ -286,7 +303,7 @@ func TestSasCollector_Metrics(t *testing.T) {
 			wantMetricsType:   "gauge",
 			wantMetricsLabels: `ike_id="some-unique-id",ike_name="ike-name"`,
 			wantMetricsValue:  565,
-			wantMetricsCount:  14,
+			wantMetricsCount:  15,
 		},
 		{
 			name: "ike rekey",
@@ -301,7 +318,7 @@ func TestSasCollector_Metrics(t *testing.T) {
 			wantMetricsType:   "gauge",
 			wantMetricsLabels: `ike_id="some-unique-id",ike_name="ike-name"`,
 			wantMetricsValue:  12,
-			wantMetricsCount:  14,
+			wantMetricsCount:  15,
 		},
 		{
 			name: "ike reauth",
@@ -316,7 +333,7 @@ func TestSasCollector_Metrics(t *testing.T) {
 			wantMetricsType:   "gauge",
 			wantMetricsLabels: `ike_id="some-unique-id",ike_name="ike-name"`,
 			wantMetricsValue:  15,
-			wantMetricsCount:  14,
+			wantMetricsCount:  15,
 		},
 		{
 			name: "ike children",
@@ -338,7 +355,7 @@ func TestSasCollector_Metrics(t *testing.T) {
 			wantMetricsType:   "gauge",
 			wantMetricsLabels: `ike_id="some-unique-id",ike_name="ike-name"`,
 			wantMetricsValue:  2,
-			wantMetricsCount:  40,
+			wantMetricsCount:  41,
 		},
 	}
 	for _, tt := range tests {
@@ -555,7 +572,7 @@ func TestSasCollector_MetricsChild(t *testing.T) {
 			})
 
 			cnt := testutil.CollectAndCount(c)
-			require.Equal(t, 27, cnt, "metrics count")
+			require.Equal(t, 28, cnt, "metrics count")
 
 			wantMetricsContent := fmt.Sprintf(`# HELP %s %s
 # TYPE %s %s

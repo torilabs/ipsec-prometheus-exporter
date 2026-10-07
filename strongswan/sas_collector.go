@@ -21,6 +21,7 @@ type SasCollector struct {
 	viciClientFn viciClientFn
 
 	ikeCnt           *prometheus.Desc
+	ikeInfo          *prometheus.Desc
 	ikeVersion       *prometheus.Desc
 	ikeStatus        *prometheus.Desc
 	ikeInitiator     *prometheus.Desc
@@ -58,6 +59,11 @@ func NewSasCollector(prefix string, viciClientFn viciClientFn) prometheus.Collec
 			prefix+"ike_count",
 			"Number of known IKEs",
 			nil, nil,
+		),
+		ikeInfo: prometheus.NewDesc(
+			prefix+"ike_info",
+			"Identities and remote host of this IKE",
+			[]string{"ike_name", "ike_id", "local_id", "remote_id", "remote_host"}, nil,
 		),
 		ikeVersion: prometheus.NewDesc(
 			prefix+"ike_version",
@@ -195,6 +201,7 @@ func NewSasCollector(prefix string, viciClientFn viciClientFn) prometheus.Collec
 
 func (c *SasCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.ikeCnt
+	ch <- c.ikeInfo
 	ch <- c.ikeVersion
 	ch <- c.ikeStatus
 	ch <- c.ikeInitiator
@@ -248,6 +255,13 @@ func (c *SasCollector) Collect(ch chan<- prometheus.Metric) {
 }
 
 func (c *SasCollector) collectIkeMetrics(ikeSa IkeSa, ch chan<- prometheus.Metric) {
+	ch <- prometheus.MustNewConstMetric(
+		c.ikeInfo,
+		prometheus.GaugeValue,
+		1,
+		ikeSa.Name, ikeSa.UniqueID, ikeSa.LocalID, ikeSa.RemoteID, ikeSa.RemoteHost,
+	)
+
 	ch <- prometheus.MustNewConstMetric(
 		c.ikeVersion,
 		prometheus.GaugeValue,
